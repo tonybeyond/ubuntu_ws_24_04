@@ -97,9 +97,11 @@ def verify_payload(directory):
         path = root / name
         if not path.resolve().is_relative_to(root) or path.is_symlink():
             raise ValueError("Chemin interdit dans le contenu embarqué.")
+        checksum = hashlib.sha256()
         with path.open("rb") as stream:
-            value = hashlib.file_digest(stream, "sha256").hexdigest()
-        if value != digest:
+            for chunk in iter(lambda: stream.read(1024 ** 2), b""):
+                checksum.update(chunk)
+        if checksum.hexdigest() != digest:
             raise ValueError("Contrôle SHA-256 du contenu embarqué en échec.")
     print("Intégrité du contenu embarqué vérifiée.")
 

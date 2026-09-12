@@ -111,6 +111,25 @@ class ConfigurationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 iso_config.verify_payload(root)
 
+    def test_payload_without_file_digest(self):
+        import hashlib
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            data = b"x" * (1024 ** 2 + 17)
+            (root / "script").write_bytes(data)
+            (root / "empty").write_bytes(b"")
+            (root / "manifest.json").write_text(json.dumps({"files": {
+                "script": hashlib.sha256(data).hexdigest(),
+                "empty": hashlib.sha256(b"").hexdigest(),
+            }}))
+            with patch.object(hashlib, "file_digest", create=True):
+                del hashlib.file_digest
+                with contextlib.redirect_stdout(io.StringIO()):
+                    iso_config.verify_payload(root)
+                (root / "script").write_bytes(b"modified")
+                with self.assertRaisesRegex(ValueError, "SHA-256"):
+                    iso_config.verify_payload(root)
+
     def test_archive_traversal_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
