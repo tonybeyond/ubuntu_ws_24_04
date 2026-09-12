@@ -29,6 +29,23 @@ def copy(source, destination, mode=0o644):
     destination.chmod(mode)
 
 
+def copier_arbre(source, destination):
+    """Copie un dossier du contenu embarqué, sans toucher aux ajouts de l'utilisateur.
+
+    Les greffons Neovim vivent ailleurs (~/.local/share/nvim) et le verrou
+    nvim-pack-lock.json est écrit par vim.pack : seuls les fichiers du profil
+    sont remplacés, le reste du dossier est laissé en place.
+    """
+    if not source.is_dir():
+        raise ValueError(f"Dossier absent du contenu embarqué : {source}")
+    for fichier in sorted(source.rglob("*")):
+        if fichier.is_file():
+            cible = destination / fichier.relative_to(source)
+            cible.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(fichier, cible)
+            cible.chmod(0o644)
+
+
 def layout(home):
     return [
         (FILES / "bashrc", home / ".bashrc", 0o644),
@@ -47,6 +64,7 @@ def system(username):
         raise ValueError("starship introuvable dans le PATH système.")
     for source, destination, mode in layout(SKEL):
         copy(source, destination, mode)
+    copier_arbre(FILES / "nvim", SKEL / ".config/nvim")
     # Le shell de connexion reste bash ; seul son contenu change.
     if entry.pw_shell not in {"/bin/bash", "/usr/bin/bash"}:
         raise ValueError(f"Shell inattendu pour {username} : {entry.pw_shell}")
@@ -64,6 +82,7 @@ def configure_user():
             if not backup.exists():
                 shutil.copyfile(destination, backup)
         copy(source, destination, mode)
+    copier_arbre(FILES / "nvim", home / ".config/nvim")
     write(home / ".bashrc.local", "# Ajouts personnels, préservés lors d’une réinstallation du profil.\n", 0o644)
     print("Shell utilisateur configuré.")
 

@@ -180,12 +180,10 @@ def fetch_pins(payload, cache):
 def prepare_payload(work, citrix, cache):
     payload = work / "payload"
     payload.mkdir()
-    for name in ["iso_config.py", "install-desktop.sh", "session_setup.py", "theme.py", "citrix_mode.py", "packages.py", "shell_setup.py"]:
+    for name in ["iso_config.py", "install-desktop.sh", "session_setup.py", "theme.py", "citrix_mode.py", "packages.py", "shell_setup.py", "doctor.py"]:
         shutil.copy2(ROOT / "scripts" / name, payload / name)
-    for source in sorted((ROOT / "scripts/files").iterdir()):
-        if source.is_file():
-            (payload / "files").mkdir(exist_ok=True)
-            shutil.copy2(source, payload / "files" / source.name)
+    # files/ contient des sous-dossiers (configuration Neovim) : copie récursive.
+    shutil.copytree(ROOT / "scripts/files", payload / "files")
     fetch_pins(payload, cache)
     if not citrix.is_file():
         raise ValueError("Fournir le paquet DEB AMD64 officiel de Citrix Workspace avec --citrix-deb.")

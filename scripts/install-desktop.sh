@@ -157,6 +157,41 @@ if ! fc-cache -f "$FONT_DIR" >/dev/null 2>&1; then
   printf '%s\n' 'Avertissement : fc-cache a échoué dans le chroot ; enregistrement reporté au premier démarrage.' >&2
 fi
 
+step 'Serveurs LSP pour Neovim'
+apt-get install --no-install-recommends -y $(python3 "$PAYLOAD/packages.py" --apt neovim)
+tar -xzf "$PAYLOAD/extras/ruff.tar.gz" -C /usr/local/bin --strip-components=1 \
+  ruff-x86_64-unknown-linux-gnu/ruff
+chmod 0755 /usr/local/bin/ruff
+install -m 0755 "$PAYLOAD/extras/marksman" /usr/local/bin/marksman
+for binary in pylsp ruff marksman; do
+  command -v "$binary" >/dev/null || { printf '%s\n' "Serveur LSP absent après installation : $binary" >&2; exit 1; }
+done
+/usr/local/bin/ruff --version
+/usr/local/bin/marksman --version
+
+step 'Mises à jour de sécurité automatiques'
+apt-get install --no-install-recommends -y $(python3 "$PAYLOAD/packages.py" --apt securite)
+# Le dépôt Brave publie ses correctifs de sécurité sur l'origine « stable » ;
+# l'y ajouter explicitement, sinon seules les origines Ubuntu sont couvertes.
+cat > /etc/apt/apt.conf.d/52-ubunturiri-unattended <<'CONFIG'
+Unattended-Upgrade::Allowed-Origins {
+        "${distro_id}:${distro_codename}-security";
+        "${distro_id}ESMApps:${distro_codename}-apps-security";
+        "${distro_id}ESM:${distro_codename}-infra-security";
+        "Brave Software:stable";
+};
+Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
+Unattended-Upgrade::Remove-Unused-Dependencies "true";
+Unattended-Upgrade::Automatic-Reboot "false";
+CONFIG
+chmod 0644 /etc/apt/apt.conf.d/52-ubunturiri-unattended
+printf 'APT::Periodic::Update-Package-Lists "1";\nAPT::Periodic::Unattended-Upgrade "1";\n' \
+  > /etc/apt/apt.conf.d/20auto-upgrades
+chmod 0644 /etc/apt/apt.conf.d/20auto-upgrades
+systemctl enable unattended-upgrades.service
+unattended-upgrade --dry-run --debug >/dev/null 2>&1 \
+  || printf '%s\n' 'Avertissement : la simulation unattended-upgrade a échoué dans le chroot ; à vérifier après démarrage.' >&2
+
 step 'Navigateur Brave Origin'
 install -m 0644 "$PAYLOAD/extras/brave-browser-archive-keyring.gpg" /usr/share/keyrings/brave-browser-archive-keyring.gpg
 python3 "$PAYLOAD/packages.py" --brave-source > /etc/apt/sources.list.d/brave-browser.sources
@@ -175,5 +210,23 @@ runuser -u "$USER_NAME" -- env HOME="$USER_HOME" dbus-run-session -- python3 "$P
 runuser -u "$USER_NAME" -- env HOME="$USER_HOME" python3 "$PAYLOAD/shell_setup.py" user
 systemctl enable gdm3.service NetworkManager.service bluetooth.service
 systemctl set-default graphical.target
+
+step 'Purge du contenu embarqué'
+# Tout est installé : les paquets, archives et sources embarqués ne servent
+# plus. Restent nécessaires au fonctionnement les scripts Python, themes/ que
+# lit theme.py à chaque ouverture de session, et files/ pour une réapplication
+# du profil. Le manifeste part avec le reste, plus rien ne le vérifie.
+#
+# Contrepartie assumée : une réinstallation hors ligne depuis ces paquets n'est
+# plus possible, il faut repartir de l'ISO.
+AVANT="$(du -sm "$PAYLOAD" | cut -f1)"
+rm -rf "$PAYLOAD/extras" "$PAYLOAD/pop-shell" "$PAYLOAD/icaclient.deb" "$PAYLOAD/manifest.json"
+APRES="$(du -sm "$PAYLOAD" | cut -f1)"
+printf 'Contenu embarqué : %s Mio → %s Mio, %s Mio rendus au disque.\n' \
+  "$AVANT" "$APRES" "$((AVANT - APRES))"
+for garde in theme.py citrix_mode.py session_setup.py shell_setup.py doctor.py themes files; do
+  [[ -e "$PAYLOAD/$garde" ]] || { printf '%s\n' "Purge trop large : $garde manquant dans $PAYLOAD" >&2; exit 1; }
+done
+
 apt-get clean
-printf '%s\n' 'Configuration du bureau terminée. GNOME X11 et Citrix restent à valider après démarrage.'
+printf '\n%s\n' 'Configuration du bureau terminée. Lancer ubunturiri-doctor après le premier démarrage pour contrôler le résultat.'

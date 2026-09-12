@@ -6,7 +6,7 @@ Le projet conserve une base serveur minimale, le pavage des fenêtres, les palet
 
 S’y ajoute une couche applicative : Ghostty, Neovim, LibreOffice francisé, NetBird, Brave Origin, et un shell bash monté comme l’environnement zsh de référence sous macOS — Starship, ble.sh, eza, zoxide, fzf. Voir [Applications et shell](#applications-et-shell).
 
-> **État : scripts testés localement, installation complète non validée.** Les tests unitaires ne remplacent pas une construction d’ISO, un démarrage en VM ni une connexion Citrix réelle. Ne pas utiliser sur un disque contenant des données sans sauvegarde.
+> **État.** L’ISO se construit, s’installe jusqu’au bout et le poste démarre sur un bureau configuré : validé en VM AMD64 avec chiffrement LUKS. Restent non validés : **le parcours Citrix réel**, le **Secure Boot**, le multimoniteur, et le comportement sur matériel physique. `ubunturiri-doctor` contrôle après installation ce que le profil prétend avoir fait. Ne pas utiliser sur un disque contenant des données sans sauvegarde.
 
 ## Configuration
 
@@ -247,6 +247,61 @@ Le locale reste `fr_CH.UTF-8` ; le `export LC_ALL=en_US.UTF-8` du `.zshrc` macOS
 
 `TERM=xterm-ghostty` n'existe pas dans la base terminfo des serveurs, ce qui casse `nano` et les retours chariot en SSH. La configuration fournie active `shell-integration-features = ssh-env,ssh-terminfo` : Ghostty bascule sur `xterm-256color` et tente d'installer son entrée terminfo sur l'hôte distant via `infocmp` et `tic`. Option disponible depuis Ghostty 1.2.0, documentée dans `ghostty(5)` livré avec le paquet.
 
+## Contrôler le poste après installation
+
+```bash
+ubunturiri-doctor          # tous les contrôles
+ubunturiri-doctor --quiet  # seulement ce qui ne va pas
+```
+
+Sort en 0 si tout passe, en 1 sinon, et chaque échec dit quoi faire. Les contrôles couvrent la session X11 et la configuration GDM, Pop Shell installé **et** activé, le rendu netplan et l’attente réseau, la police Nerd Font, Starship et ble.sh dans le compte, les versions des applications, le dictionnaire français, les trois serveurs LSP, les greffons Neovim verrouillés, les mises à jour automatiques, et les alertes du journal d’installation.
+
+Cette commande existe pour une raison précise : une installation peut s’arrêter en cours de route sans que rien ne le montre. Le paquet `gdm3` s’active de lui-même, un bureau apparaît, et les dernières étapes du profil n’ont pourtant jamais tourné. Un bureau qui s’affiche ne prouve rien.
+
+## Neovim
+
+Configuration modulaire dans `~/.config/nvim`, dans l’esprit de [kickstart.nvim](https://github.com/nvim-lua/kickstart.nvim) : courte, commentée, faite pour être modifiée. Deux choix que seul Neovim 0.12 permet.
+
+**Greffons : `vim.pack`, natif.** Aucun code d’amorçage, ni `lazy.nvim` ni `packer`. L’état exact de chaque greffon est figé dans `~/.config/nvim/nvim-pack-lock.json` : le mettre sous gestion de version rend la configuration reproductible d’une machine à l’autre.
+
+```vim
+:lua vim.pack.update()                      " mise à jour, avec revue avant application
+:lua vim.pack.update(nil, {offline = true}) " lister l'existant, sans réseau
+```
+
+**LSP : configuration native.** Un fichier par serveur dans `~/.config/nvim/lsp/`, activé par `vim.lsp.enable()`. Ni `nvim-lspconfig` ni Mason : les trois serveurs sont installés avec le système. La complétion vient de `vim.lsp.completion`, intégrée depuis 0.11 — aucun greffon de complétion.
+
+| Serveur | Rôle | Provenance |
+| --- | --- | --- |
+| `pylsp` | complétion, survol, définitions, renommage Python | paquet Ubuntu `python3-pylsp` |
+| `ruff` | diagnostics et formatage Python | binaire épinglé 0.16.6 |
+| `marksman` | liens, ancres et navigation Markdown | binaire épinglé 2026-02-08 |
+
+Les greffons de lint de `pylsp` sont désactivés dans `lsp/pylsp.lua` : ruff s’en charge, et les laisser produirait des diagnostics en double.
+
+Cinq greffons, pas davantage : `tokyonight.nvim` pour rester accordé au reste du profil, `nvim-treesitter`, `render-markdown.nvim` pour lire du Markdown mis en forme dans le tampon, `fzf-lua` qui s’appuie sur les `fzf` et `ripgrep` déjà installés, et `gitsigns.nvim`.
+
+Neovim livre déjà les analyseurs Treesitter `markdown` et `markdown_inline` : le Markdown fonctionne sans rien télécharger. Les analyseurs Python, Bash, JSON, YAML et TOML sont récupérés au premier démarrage, ce qui **demande un accès réseau**. En cas d’échec, Neovim démarre quand même et la coloration retombe sur la syntaxe classique pour ces langages.
+
+Les ajouts personnels vont dans `~/.config/nvim/lua/local.lua`, chargé en fin d’`init.lua` et jamais écrasé par une réapplication du profil.
+
+Raccourcis ajoutés par le profil, en plus de ceux de Neovim (`grn`, `gra`, `grr`, `gO`) :
+
+| Raccourci | Action |
+| --- | --- |
+| `<Espace><Espace>` | Ouvrir un fichier |
+| `<Espace>fg` | Rechercher dans les fichiers |
+| `<Espace>fd` `<Espace>fs` | Diagnostics, symboles du tampon |
+| `<Espace>cf` `<Espace>cr` `<Espace>ca` | Formater, renommer, action de code |
+| `<Espace>mr` | Markdown : basculer le rendu |
+| `grd` `gri` `K` | Définition, implémentation, survol |
+
+## Maintenance et empreinte disque
+
+**Mises à jour de sécurité automatiques.** `unattended-upgrades` est installé et actif, sur les origines de sécurité Ubuntu **et** sur `Brave Software:stable` — sans quoi le navigateur, principale surface exposée du poste, ne serait pas couvert. Le redémarrage automatique est désactivé.
+
+**Purge du contenu embarqué.** Une fois tout installé, les paquets, archives et sources embarqués ne servent plus : ils sont supprimés de `/opt/ubunturiri` en fin d’installation, soit environ 175 Mio rendus au disque. Restent les scripts Python, `themes/` que lit `theme.py` à chaque ouverture de session, et `files/`. Contrepartie assumée : une réinstallation hors ligne depuis ces paquets n’est plus possible, il faut repartir de l’ISO.
+
 ## Citrix : installation et limites
 
 Le script vérifie le nom `icaclient` et l’architecture `amd64` du DEB, puis laisse APT résoudre ses dépendances dans Ubuntu 24.04. Ce contrôle n’authentifie pas le fournisseur du DEB : utiliser uniquement le téléchargement officiel. Aucun dépôt d’une autre version Ubuntu ni faux lien de bibliothèque n’est ajouté.
@@ -264,7 +319,8 @@ Le paquet Citrix est embarqué dans l’ISO privée, mais **n’est pas fourni d
 | `scripts/packages.py` | Listes de paquets APT, composants épinglés par URL et SHA-256, dépôt Brave |
 | `scripts/refresh_pins.py` | Recalcul des empreintes après un changement de version |
 | `scripts/shell_setup.py` | Pose du bashrc, de starship.toml et de la configuration Ghostty |
-| `scripts/files/` | bashrc, starship.toml et configuration Ghostty embarqués tels quels |
+| `scripts/doctor.py` | Contrôle post-installation, exposé sous `ubunturiri-doctor` |
+| `scripts/files/` | bashrc, starship.toml, configuration Ghostty et arborescence Neovim |
 | `scripts/iso_config.py` | Configuration Subiquity, modification GRUB, contrôles du contenu et de LUKS |
 | `scripts/install-desktop.sh` | Installation dans la cible ; ne pas exécuter directement sur le poste de travail |
 | `scripts/session_setup.py` | Configuration GDM, GNOME, raccourcis et compte utilisateur |
@@ -283,7 +339,9 @@ bash -n build-iso.sh scripts/install-desktop.sh
 python3 -m py_compile scripts/*.py tests/*.py
 ```
 
-Les contrôles locaux comprennent **62 tests unitaires réussis**, la syntaxe Bash/Python, la vérification des clés Pop Shell sur les sources épinglées, le rendu de **22 palettes avec appels GNOME simulés** et la présence de **71 noms de paquets** dans les index Noble AMD64. Ces résultats ne prouvent ni la résolution APT complète ni le bon fonctionnement graphique.
+Les contrôles locaux comprennent **77 tests unitaires réussis**, la syntaxe Bash/Python, la vérification des clés Pop Shell sur les sources épinglées, le rendu de **22 palettes avec appels GNOME simulés** et la présence de **71 noms de paquets** dans les index Noble AMD64. Ces résultats ne prouvent ni la résolution APT complète ni le bon fonctionnement graphique.
+
+Contrôles supplémentaires de cette itération : la configuration Neovim a été exécutée par le **vrai Neovim 0.12.5 épinglé**, en mode headless, réseau ouvert — les cinq greffons s'installent, `pylsp` et `ruff` s'attachent à un fichier Python et remontent des diagnostics, `marksman` et `render-markdown` s'attachent à un fichier Markdown dont l'analyseur Treesitter démarre, le thème se charge. Le téléchargement des analyseurs Treesitter supplémentaires **n'a pas pu être vérifié** : le réseau de l'environnement de développement refuse `codeload.github.com` en HTTP 403. `ubunturiri-doctor` a été exécuté sur un système partiellement équipé et rend bien compte de l'état réel.
 
 Contrôles supplémentaires effectués sur les composants ajoutés, hors ISO : téléchargement réel des 9 composants épinglés et correspondance de leurs SHA-256, préparation complète du contenu embarqué avec `verify_payload` (122 fichiers, 72,6 Mio), rejeu des commandes d'extraction `tar` de `install-desktop.sh`, validation de `starship.toml` par le binaire Starship 1.25.1 sans avertissement, contrôle de chaque clé de la configuration Ghostty contre `ghostty(5)` livré dans le paquet, et chargement du bashrc dans un bash interactif réel avec `ble.sh` rattaché. **L'installation dans une cible Ubuntu 24.04 reste à valider.**
 

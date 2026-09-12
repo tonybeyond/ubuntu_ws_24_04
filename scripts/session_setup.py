@@ -56,7 +56,7 @@ def system(username):
     # de NetworkManager, qui gère désormais les interfaces.
     subprocess.run(["systemctl", "mask", "systemd-networkd-wait-online.service"], check=True)
     subprocess.run(["systemctl", "enable", "NetworkManager-wait-online.service"], check=True)
-    for command, script in [("ubunturiri-theme-set", "theme.py"), ("ubunturiri-citrix-mode", "citrix_mode.py")]:
+    for command, script in [("ubunturiri-theme-set", "theme.py"), ("ubunturiri-citrix-mode", "citrix_mode.py"), ("ubunturiri-doctor", "doctor.py")]:
         target = Path("/usr/local/bin") / command
         target.unlink(missing_ok=True)
         (PAYLOAD / script).chmod(0o755)

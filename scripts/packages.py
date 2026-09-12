@@ -59,6 +59,18 @@ PINS = {
         "sha256": "04d5e8f903693f9dd13e16f867e994834e681eb3c72c0d337a770dcda09010cf",
         "note": "fonts-jetbrains-mono de noble n'a pas les glyphes Nerd Font exigés par Starship et eza --icons",
     },
+    "extras/ruff.tar.gz": {
+        "version": "0.16.6",
+        "url": "https://github.com/astral-sh/ruff/releases/download/0.16.6/ruff-x86_64-unknown-linux-gnu.tar.gz",
+        "sha256": "0696335ef16615d8c7445ad438750eb0f55b3da6f153df21265a7c6d5750254f",
+        "note": "absent de noble ; diagnostics et formatage Python pour Neovim, via « ruff server »",
+    },
+    "extras/marksman": {
+        "version": "2026-02-08",
+        "url": "https://github.com/artempyanykh/marksman/releases/download/2026-02-08/marksman-linux-x64",
+        "sha256": "be5098e8213219269c47fc0d916a66fa31ce0602ec967475c722260aabf26087",
+        "note": "absent de noble ; serveur LSP Markdown, binaire unique sans dépendance manquante sur noble",
+    },
     "extras/brave-browser-archive-keyring.gpg": {
         "version": "2025-07-30",
         "url": "https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg",
@@ -82,6 +94,16 @@ APT_GROUPS = {
         "mythes-fr",
         "hyphen-fr",
         "fonts-liberation",
+    ],
+    # Serveur LSP Python. python3-ujson est une vraie dépendance du paquet,
+    # donc --no-install-recommends ne le prive de rien.
+    "neovim": [
+        "python3-pylsp",
+        "python3-pynvim",
+    ],
+    # Mises à jour de sécurité automatiques, dépôt Brave compris.
+    "securite": [
+        "unattended-upgrades",
     ],
     "shell": [
         "eza",

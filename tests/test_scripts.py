@@ -595,6 +595,9 @@ class ShellSetupTests(unittest.TestCase):
             files.mkdir()
             for name in ["bashrc", "starship.toml", "ghostty-config"]:
                 (files / name).write_text(f"contenu {name}\n")
+            (files / "nvim/lua/ubunturiri").mkdir(parents=True)
+            (files / "nvim/init.lua").write_text("-- simulation\n")
+            (files / "nvim/lua/ubunturiri/options.lua").write_text("-- simulation\n")
             home.mkdir()
             (home / ".bashrc").write_text("bashrc Ubuntu d’origine\n")
             with patch("shell_setup.FILES", files), patch("shell_setup.os.geteuid", return_value=1000), patch("shell_setup.Path.home", return_value=home), contextlib.redirect_stdout(io.StringIO()):
@@ -604,6 +607,8 @@ class ShellSetupTests(unittest.TestCase):
             self.assertTrue((home / ".config/starship.toml").is_file())
             self.assertTrue((home / ".config/ghostty/config").is_file())
             self.assertTrue((home / ".bashrc.local").is_file())
+            self.assertTrue((home / ".config/nvim/init.lua").is_file())
+            self.assertTrue((home / ".config/nvim/lua/ubunturiri/options.lua").is_file())
 
     def test_user_setup_reports_missing_payload_file(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -625,7 +630,7 @@ class NetworkRendererTests(unittest.TestCase):
                               "var/lib/AccountsService/users", "etc/xdg/autostart", "opt/ubunturiri"]:
                 (root / directory).mkdir(parents=True, exist_ok=True)
             (root / "usr/share/xsessions/gnome-xorg.desktop").write_text("[Desktop Entry]\n")
-            for script in ["theme.py", "citrix_mode.py"]:
+            for script in ["theme.py", "citrix_mode.py", "doctor.py"]:
                 (root / "opt/ubunturiri" / script).write_text("#!/usr/bin/env python3\n")
             real_path = session_setup.Path
 
@@ -696,12 +701,128 @@ class InstallerDiagnosticsTests(unittest.TestCase):
                         or "if ! fc-cache" in self.text)
         self.assertIn("Avertissement : fc-cache a échoué", self.text)
         # Aucun exit entre le fc-cache et l'étape suivante.
-        entre = self.text[self.text.index("if ! fc-cache"):self.text.index("step 'Navigateur Brave Origin'")]
-        self.assertNotIn("exit 1", entre)
+        bloc = self.text[self.text.index("if ! fc-cache"):]
+        bloc = bloc[:bloc.index("\nfi\n") + 4]
+        self.assertNotIn("exit", bloc)
 
     def test_every_step_is_announced_through_the_logged_helper(self):
         self.assertGreaterEqual(self.text.count("\nstep '"), 9)
         self.assertIn("=== ubunturiri : %s ===", self.text)
+
+
+class PurgeAndMaintenanceTests(unittest.TestCase):
+
+    def setUp(self):
+        self.text = (build_iso.ROOT / "scripts/install-desktop.sh").read_text()
+
+    def test_purge_removes_payload_but_keeps_the_runtime(self):
+        purge = self.text[self.text.index("step 'Purge du contenu embarqué'"):]
+        for jetable in ["$PAYLOAD/extras", "$PAYLOAD/pop-shell", "$PAYLOAD/icaclient.deb"]:
+            self.assertIn(jetable, purge)
+        # theme.py lit themes/ à chaque ouverture de session, l'autostart appelle
+        # session_setup.py : les supprimer casserait le poste.
+        for garde in ["theme.py", "citrix_mode.py", "session_setup.py", "shell_setup.py", "doctor.py", "themes", "files"]:
+            self.assertIn(garde, purge)
+
+    def test_purge_runs_after_the_session_is_configured(self):
+        self.assertLess(self.text.index("step 'Configuration de la session GNOME et du shell'"),
+                        self.text.index("step 'Purge du contenu embarqué'"))
+
+    def test_unattended_upgrades_covers_brave(self):
+        self.assertIn('"Brave Software:stable";', self.text)
+        self.assertIn('APT::Periodic::Unattended-Upgrade "1";', self.text)
+        self.assertIn("systemctl enable unattended-upgrades.service", self.text)
+        self.assertIn("Automatic-Reboot \"false\"", self.text)
+
+
+class DoctorTests(unittest.TestCase):
+
+    def setUp(self):
+        sys.path.insert(0, str(build_iso.ROOT / "scripts"))
+        import doctor
+        self.doctor = doctor
+
+    def test_every_check_is_registered(self):
+        source = (build_iso.ROOT / "scripts/doctor.py").read_text()
+        controles = [nom for nom in dir(self.doctor) if nom.startswith("controler_")]
+        self.assertGreaterEqual(len(controles), 8)
+        for nom in controles:
+            self.assertIn(nom, source.split("for controle in [")[1])
+
+    def test_failures_exit_non_zero_and_carry_a_remedy(self):
+        rapport = self.doctor.Rapport(quiet=True)
+        with contextlib.redirect_stdout(io.StringIO()):
+            rapport.echec("réseau", "quelque chose manque", "voici comment le réparer")
+            self.assertEqual(rapport.verdict(), 1)
+        self.assertEqual(len(rapport.echecs), 1)
+        self.assertTrue(all(entree[2] for entree in rapport.echecs))
+
+    def test_clean_report_exits_zero(self):
+        rapport = self.doctor.Rapport(quiet=True)
+        with contextlib.redirect_stdout(io.StringIO()):
+            rapport.ok("shell", "tout va bien")
+            self.assertEqual(rapport.verdict(), 0)
+
+    def test_missing_command_never_raises(self):
+        self.assertIsNone(self.doctor.sortie(["/commande/qui/nexiste/pas"]))
+
+    def test_exposed_as_a_command(self):
+        source = (build_iso.ROOT / "scripts/session_setup.py").read_text()
+        self.assertIn('("ubunturiri-doctor", "doctor.py")', source)
+
+
+class NeovimConfigTests(unittest.TestCase):
+
+    RACINE = None
+
+    def setUp(self):
+        self.RACINE = build_iso.ROOT / "scripts/files/nvim"
+
+    def test_expected_files_are_present(self):
+        for relatif in ["init.lua", "lua/ubunturiri/options.lua", "lua/ubunturiri/plugins.lua",
+                        "lua/ubunturiri/lsp.lua", "lua/ubunturiri/keymaps.lua",
+                        "lsp/pylsp.lua", "lsp/ruff.lua", "lsp/marksman.lua"]:
+            self.assertTrue((self.RACINE / relatif).is_file(), relatif)
+
+    def test_init_loads_every_module(self):
+        init = (self.RACINE / "init.lua").read_text()
+        for module in ["options", "plugins", "lsp", "keymaps"]:
+            self.assertIn(f"require('ubunturiri.{module}')", init)
+        self.assertLess(init.index("mapleader"), init.index("require('ubunturiri.options')"))
+
+    def test_server_files_return_a_command(self):
+        for nom, binaire in [("pylsp", "pylsp"), ("ruff", "ruff"), ("marksman", "marksman")]:
+            contenu = (self.RACINE / f"lsp/{nom}.lua").read_text()
+            self.assertIn("return {", contenu)
+            self.assertIn(f"'{binaire}'", contenu)
+            self.assertIn("filetypes", contenu)
+            self.assertIn("root_markers", contenu)
+
+    def test_lint_is_not_duplicated_between_pylsp_and_ruff(self):
+        pylsp = (self.RACINE / "lsp/pylsp.lua").read_text()
+        for greffon in ["pycodestyle", "pyflakes", "mccabe", "autopep8", "yapf"]:
+            self.assertRegex(pylsp, greffon + r" = \{ enabled = false \}")
+
+    def test_no_third_party_plugin_manager(self):
+        # vim.pack est natif depuis 0.12 : la présence de lazy.nvim ou packer
+        # signalerait un retour en arrière.
+        for fichier in self.RACINE.rglob("*.lua"):
+            code = "\n".join(l for l in fichier.read_text().splitlines() if not l.lstrip().startswith("--"))
+            for ancien in ["lazy.nvim", "packer.nvim", "vim-plug", "nvim-lspconfig", "mason.nvim"]:
+                self.assertNotIn(ancien, code, f"{fichier.name} : {ancien}")
+        self.assertIn("vim.pack.add", (self.RACINE / "lua/ubunturiri/plugins.lua").read_text())
+
+    def test_treesitter_install_is_idempotent(self):
+        plugins = (self.RACINE / "lua/ubunturiri/plugins.lua").read_text()
+        self.assertIn("nvim_get_runtime_file('parser/'", plugins)
+        self.assertIn("#manquants > 0", plugins)
+
+    def test_config_is_embedded_and_installed(self):
+        source = (build_iso.ROOT / "scripts/build_iso.py").read_text()
+        self.assertIn('shutil.copytree(ROOT / "scripts/files", payload / "files")', source)
+        shell = (build_iso.ROOT / "scripts/shell_setup.py").read_text()
+        self.assertIn('copier_arbre(FILES / "nvim", home / ".config/nvim")', shell)
+        self.assertIn('copier_arbre(FILES / "nvim", SKEL / ".config/nvim")', shell)
 
 
 class BashrcTests(unittest.TestCase):
