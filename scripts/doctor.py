@@ -88,6 +88,29 @@ def etat_unite(unite):
     return etat or None
 
 
+def etat_chemin(chemin):
+    """« present », « illisible » ou « absent », sans jamais lever.
+
+    Path.exists() relaie PermissionError quand un dossier parent n'est pas
+    traversable : un simple contrôle de présence faisait planter la commande
+    entière. Et un fichier présent mais illisible est le cas le plus sournois,
+    puisque le bashrc le saute sans rien dire.
+    """
+    chemin = Path(chemin)
+    try:
+        if not chemin.exists():
+            return "absent"
+    except OSError:
+        return "illisible"
+    try:
+        with chemin.open("rb"):
+            return "present"
+    except IsADirectoryError:
+        return "present"
+    except OSError:
+        return "illisible"
+
+
 def gsettings(schema, cle):
     return sortie(["gsettings", "get", schema, cle])
 
@@ -159,8 +182,14 @@ def controler_police(r):
 
 def controler_shell(r):
     for nom, chemin in [("Starship", "/usr/local/bin/starship"), ("ble.sh", "/usr/share/blesh/ble.sh")]:
-        if Path(chemin).exists():
+        etat = etat_chemin(chemin)
+        if etat == "present":
             r.ok("shell", f"{nom} installé")
+        elif etat == "illisible":
+            # Le bashrc se contente de tester la présence : une permission trop
+            # stricte le fait sauter la source sans le moindre message.
+            r.echec("shell", f"{nom} installé mais illisible pour votre compte",
+                    f"sudo chmod -R a+rX {Path(chemin).parent} ; sinon il est ignoré en silence")
         else:
             r.echec("shell", f"{nom} absent", f"attendu dans {chemin}")
 
@@ -189,14 +218,19 @@ def controler_applications(r):
         ("fastfetch", ["/usr/bin/fastfetch", "--version"], "fastfetch"),
     ]
     for categorie, commande, nom in attendus:
-        if not Path(commande[0]).exists():
+        etat = etat_chemin(commande[0])
+        if etat == "absent":
             r.echec("applications", f"{nom} absent", f"attendu en {commande[0]}")
+            continue
+        if etat == "illisible":
+            r.echec("applications", f"{nom} installé mais inaccessible",
+                    f"sudo chmod -R a+rX {Path(commande[0]).parent}")
             continue
         version = sortie(commande)
         premiere = version.splitlines()[0] if version else "version illisible"
         r.ok("applications", f"{nom} : {premiere}")
 
-    if shutil.which("hunspell") or Path("/usr/share/hunspell/fr_FR.dic").exists():
+    if shutil.which("hunspell") or etat_chemin("/usr/share/hunspell/fr_FR.dic") == "present":
         r.ok("applications", "dictionnaire français installé")
     else:
         r.echec("applications", "dictionnaire français absent",
@@ -260,7 +294,7 @@ def controler_lsp(r):
 
 
 def controler_maintenance(r):
-    if Path("/usr/bin/unattended-upgrade").exists():
+    if etat_chemin("/usr/bin/unattended-upgrade") != "absent":
         etat = etat_unite("unattended-upgrades.service")
         if etat == "enabled":
             r.ok("maintenance", "mises à jour de sécurité automatiques actives")

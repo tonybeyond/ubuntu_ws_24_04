@@ -28,6 +28,17 @@ step() {
   printf '\n=== ubunturiri : %s ===\n' "$1"
 }
 
+# Un fichier installé mais illisible par les utilisateurs est le pire des cas :
+# le bashrc le saute sans rien dire, et le poste paraît correct. Contrôler
+# depuis un compte non privilégié, pas depuis root qui lit tout.
+verifier_lisible() {
+  local chemin=$1
+  runuser -u nobody -- test -r "$chemin" && return 0
+  printf '%s\n' "Installé mais illisible pour les utilisateurs : $chemin" >&2
+  printf '%s\n' "  mode actuel : $(stat -c '%a %U:%G' "$(dirname "$chemin")") sur le dossier parent" >&2
+  exit 1
+}
+
 on_error() {
   local status=$? line=$1 command=$2
   printf '\nECHEC ubunturiri : ligne %s, code %s\n  commande : %s\n  journal  : %s\n' \
@@ -109,11 +120,13 @@ tar -xzf "$PAYLOAD/extras/nvim.tar.gz" -C /opt/nvim --strip-components=1
 ln -sfn /opt/nvim/bin/nvim /usr/local/bin/nvim
 /usr/local/bin/nvim --version | head -n1
 update-alternatives --install /usr/bin/editor editor /opt/nvim/bin/nvim 60
+verifier_lisible /opt/nvim/bin/nvim
 
 step 'Starship et ble.sh'
 tar -xzf "$PAYLOAD/extras/starship.tar.gz" -C /usr/local/bin starship
 chmod 0755 /usr/local/bin/starship
 /usr/local/bin/starship --version >/dev/null
+verifier_lisible /usr/local/bin/starship
 BLE_BUILD="$(mktemp -d /tmp/ubunturiri-ble.XXXXXX)"
 tar -xJf "$PAYLOAD/extras/blesh.tar.xz" -C "$BLE_BUILD" --strip-components=1
 rm -rf /usr/share/blesh
@@ -121,6 +134,12 @@ mkdir -p /usr/share/blesh
 cp -a "$BLE_BUILD/." /usr/share/blesh/
 rm -rf -- "$BLE_BUILD"
 [[ -f /usr/share/blesh/ble.sh ]]
+# « cp -a source/. destination/ » applique le mode de « source/. » au dossier
+# destination. La source est un mktemp -d, donc en 0700 : sans ce chmod,
+# /usr/share/blesh devient inaccessible aux utilisateurs et le bashrc saute
+# ble.sh en silence, puisqu'il se contente de tester la présence du fichier.
+chmod -R a+rX /usr/share/blesh
+verifier_lisible /usr/share/blesh/ble.sh
 
 step 'Police JetBrainsMono Nerd Font'
 FONT_DIR=/usr/local/share/fonts/JetBrainsMonoNerdFont
@@ -148,6 +167,7 @@ fc-scan --format '%{family}\n' "$FONT_DIR/JetBrainsMonoNerdFontMono-Regular.ttf"
     printf '%s\n' 'Police : la famille lue dans le fichier ne correspond pas à JetBrainsMono Nerd Font Mono.' >&2
     exit 1
   }
+verifier_lisible "$FONT_DIR/JetBrainsMonoNerdFontMono-Regular.ttf"
 printf 'Police : %s fichiers installés, famille vérifiée dans le fichier.\n' "$FONT_COUNT"
 
 # fc-cache accélère la prise en compte, sans être nécessaire : fontconfig

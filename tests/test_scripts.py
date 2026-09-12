@@ -799,6 +799,48 @@ class DoctorTests(unittest.TestCase):
         self.assertIn("CLI tree-sitter absent", source)
         self.assertIn("[0, 26]", source)
 
+    def test_unreadable_file_is_reported_not_crashed(self):
+        # Path.exists() relaie PermissionError quand un parent n'est pas
+        # traversable : la commande entière plantait sur /usr/share/blesh en
+        # 0700. Un fichier présent mais illisible doit être signalé, puisque le
+        # bashrc le saute sans rien dire.
+        with tempfile.TemporaryDirectory() as temporaire:
+            racine = Path(temporaire)
+            fichier = racine / "ble.sh"
+            fichier.write_text("")
+
+            # Le verdict ne doit pas dépendre de l'utilisateur qui exécute les
+            # tests : root lit un fichier en 0000. On simule donc le refus.
+            with patch.object(Path, "open", side_effect=PermissionError(13, "Permission denied")):
+                self.assertEqual(self.doctor.etat_chemin(fichier), "illisible")
+            with patch.object(Path, "exists", side_effect=PermissionError(13, "Permission denied")):
+                self.assertEqual(self.doctor.etat_chemin(fichier), "illisible")
+
+            self.assertEqual(self.doctor.etat_chemin(fichier), "present")
+            self.assertEqual(self.doctor.etat_chemin(racine), "present")
+            self.assertEqual(self.doctor.etat_chemin(racine / "absent"), "absent")
+
+    def test_unreadable_file_is_reported_as_a_real_failure(self):
+        rapport = self.doctor.Rapport(quiet=True)
+        with patch("doctor.etat_chemin", return_value="illisible"), \
+             patch("doctor.Path.home", return_value=Path("/inexistant")), \
+             contextlib.redirect_stdout(io.StringIO()):
+            self.doctor.controler_shell(rapport)
+        libelles = " ".join(libelle for _, libelle, _ in rapport.echecs)
+        self.assertIn("illisible", libelles)
+        remedes = " ".join(remede for _, _, remede in rapport.echecs)
+        self.assertIn("chmod -R a+rX", remedes)
+        self.assertIn("ignoré en silence", remedes)
+
+    def test_no_bare_exists_call_remains(self):
+        code = "\n".join(
+            ligne for ligne in (build_iso.ROOT / "scripts/doctor.py").read_text().splitlines()
+            if not ligne.lstrip().startswith("#")
+        )
+        # Seul etat_chemin() a le droit d'appeler exists(), à l'abri d'un try.
+        corps = code.split("def gsettings")[1]
+        self.assertNotIn(".exists()", corps)
+
     def test_exposed_as_a_command(self):
         source = (build_iso.ROOT / "scripts/session_setup.py").read_text()
         self.assertIn('("ubunturiri-doctor", "doctor.py")', source)
@@ -856,6 +898,35 @@ class NeovimConfigTests(unittest.TestCase):
         shell = (build_iso.ROOT / "scripts/shell_setup.py").read_text()
         self.assertIn('copier_arbre(FILES / "nvim", home / ".config/nvim")', shell)
         self.assertIn('copier_arbre(FILES / "nvim", SKEL / ".config/nvim")', shell)
+
+
+class ReadabilityTests(unittest.TestCase):
+    """« cp -a source/. destination/ » applique le mode de la source au dossier
+    destination. La source étant un mktemp -d en 0700, /usr/share/blesh
+    devenait inaccessible et ble.sh était ignoré en silence par le bashrc."""
+
+    def setUp(self):
+        self.text = (build_iso.ROOT / "scripts/install-desktop.sh").read_text()
+
+    def test_blesh_directory_is_made_readable(self):
+        bloc = self.text[self.text.index("BLE_BUILD="):self.text.index("step 'Police")]
+        self.assertIn("chmod -R a+rX /usr/share/blesh", bloc)
+        self.assertLess(bloc.index('cp -a "$BLE_BUILD/."'), bloc.index("chmod -R a+rX /usr/share/blesh"))
+
+    def test_readability_is_checked_from_an_unprivileged_account(self):
+        # Contrôler depuis root ne prouve rien : root lit tout.
+        self.assertIn('runuser -u nobody -- test -r "$chemin"', self.text)
+        self.assertIn("Installé mais illisible pour les utilisateurs", self.text)
+
+    def test_every_user_read_path_is_guarded(self):
+        for chemin in ["/usr/share/blesh/ble.sh", "/usr/local/bin/starship", "/opt/nvim/bin/nvim"]:
+            self.assertIn(f"verifier_lisible {chemin}", self.text, chemin)
+        self.assertIn('verifier_lisible "$FONT_DIR/JetBrainsMonoNerdFontMono-Regular.ttf"', self.text)
+
+    def test_guard_aborts_the_install(self):
+        fonction = self.text[self.text.index("verifier_lisible() {"):]
+        fonction = fonction[:fonction.index("\n}\n") + 3]
+        self.assertIn("exit 1", fonction)
 
 
 class TreeSitterCliTests(unittest.TestCase):

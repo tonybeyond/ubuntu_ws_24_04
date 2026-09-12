@@ -256,6 +256,12 @@ ubunturiri-doctor --quiet  # seulement ce qui ne va pas
 
 Sort en 0 si tout passe, en 1 sinon, et chaque échec dit quoi faire. Les contrôles couvrent la session X11 et la configuration GDM, Pop Shell installé **et** activé, le rendu netplan et l’attente réseau, la police Nerd Font, Starship et ble.sh dans le compte, les versions des applications, le dictionnaire français, les trois serveurs LSP, les greffons Neovim verrouillés, les mises à jour automatiques, et les alertes du journal d’installation.
 
+#### Fichier installé mais illisible
+
+Le cas le plus sournois, et il s'est produit : `cp -a "source/." destination/` applique le mode de `source/.` au dossier de destination. La source étant un `mktemp -d` en 0700, `/usr/share/blesh` devenait inaccessible aux utilisateurs. Le bashrc se contentant de tester la présence du fichier, **ble.sh était ignoré sans le moindre message** — poste d'apparence saine, autosuggestions absentes.
+
+L'installateur pose donc un `chmod -R a+rX` après la copie et vérifie la lisibilité **depuis un compte non privilégié** (`runuser -u nobody -- test -r`), car root lit tout et ne prouve rien. Quatre chemins sont couverts : ble.sh, Starship, Neovim et la police. `ubunturiri-doctor` distingue désormais « absent » de « présent mais illisible », et ne plante plus : `Path.exists()` relaie `PermissionError` quand un dossier parent n'est pas traversable.
+
 **À lancer sans `sudo`.** Aucun contrôle n'exige de privilèges, et la moitié porte sur le compte : sous `sudo`, `Path.home()` vaut `/root` et `gsettings` lit la configuration de root. Le shell, Neovim et Pop Shell seraient alors déclarés absents alors qu'ils sont en place. La commande refuse donc de s'exécuter en root plutôt que de rendre un verdict faux.
 
 Cette commande existe pour une raison précise : une installation peut s’arrêter en cours de route sans que rien ne le montre. Le paquet `gdm3` s’active de lui-même, un bureau apparaît, et les dernières étapes du profil n’ont pourtant jamais tourné. Un bureau qui s’affiche ne prouve rien.
@@ -344,7 +350,7 @@ bash -n build-iso.sh scripts/install-desktop.sh
 python3 -m py_compile scripts/*.py tests/*.py
 ```
 
-Les contrôles locaux comprennent **84 tests unitaires réussis**, la syntaxe Bash/Python, la vérification des clés Pop Shell sur les sources épinglées, le rendu de **22 palettes avec appels GNOME simulés** et la présence de **71 noms de paquets** dans les index Noble AMD64. Ces résultats ne prouvent ni la résolution APT complète ni le bon fonctionnement graphique.
+Les contrôles locaux comprennent **91 tests unitaires réussis**, la syntaxe Bash/Python, la vérification des clés Pop Shell sur les sources épinglées, le rendu de **22 palettes avec appels GNOME simulés** et la présence de **71 noms de paquets** dans les index Noble AMD64. Ces résultats ne prouvent ni la résolution APT complète ni le bon fonctionnement graphique.
 
 Contrôles supplémentaires de cette itération : la configuration Neovim a été exécutée par le **vrai Neovim 0.12.5 épinglé**, en mode headless, réseau ouvert — les cinq greffons s'installent, `pylsp` et `ruff` s'attachent à un fichier Python et remontent des diagnostics, `marksman` et `render-markdown` s'attachent à un fichier Markdown dont l'analyseur Treesitter démarre, le thème se charge. Le téléchargement des analyseurs Treesitter supplémentaires **n'a pas pu être vérifié** : le réseau de l'environnement de développement refuse `codeload.github.com` en HTTP 403. `ubunturiri-doctor` a été exécuté sur un système partiellement équipé et rend bien compte de l'état réel.
 
