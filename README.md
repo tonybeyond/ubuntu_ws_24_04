@@ -256,6 +256,8 @@ ubunturiri-doctor --quiet  # seulement ce qui ne va pas
 
 Sort en 0 si tout passe, en 1 sinon, et chaque échec dit quoi faire. Les contrôles couvrent la session X11 et la configuration GDM, Pop Shell installé **et** activé, le rendu netplan et l’attente réseau, la police Nerd Font, Starship et ble.sh dans le compte, les versions des applications, le dictionnaire français, les trois serveurs LSP, les greffons Neovim verrouillés, les mises à jour automatiques, et les alertes du journal d’installation.
 
+**À lancer sans `sudo`.** Aucun contrôle n'exige de privilèges, et la moitié porte sur le compte : sous `sudo`, `Path.home()` vaut `/root` et `gsettings` lit la configuration de root. Le shell, Neovim et Pop Shell seraient alors déclarés absents alors qu'ils sont en place. La commande refuse donc de s'exécuter en root plutôt que de rendre un verdict faux.
+
 Cette commande existe pour une raison précise : une installation peut s’arrêter en cours de route sans que rien ne le montre. Le paquet `gdm3` s’active de lui-même, un bureau apparaît, et les dernières étapes du profil n’ont pourtant jamais tourné. Un bureau qui s’affiche ne prouve rien.
 
 ## Neovim
@@ -275,11 +277,14 @@ Configuration modulaire dans `~/.config/nvim`, dans l’esprit de [kickstart.nvi
 | --- | --- | --- |
 | `pylsp` | complétion, survol, définitions, renommage Python | paquet Ubuntu `python3-pylsp` |
 | `ruff` | diagnostics et formatage Python | binaire épinglé 0.16.6 |
+| `tree-sitter` | compilation des analyseurs Treesitter | binaire épinglé 0.26.9 |
 | `marksman` | liens, ancres et navigation Markdown | binaire épinglé 2026-02-08 |
 
 Les greffons de lint de `pylsp` sont désactivés dans `lsp/pylsp.lua` : ruff s’en charge, et les laisser produirait des diagnostics en double.
 
 Cinq greffons, pas davantage : `tokyonight.nvim` pour rester accordé au reste du profil, `nvim-treesitter`, `render-markdown.nvim` pour lire du Markdown mis en forme dans le tampon, `fzf-lua` qui s’appuie sur les `fzf` et `ripgrep` déjà installés, et `gitsigns.nvim`.
+
+Le CLI `tree-sitter` est installé depuis l'amont, épinglé en 0.26.9 : `nvim-treesitter` branche main l'appelle pour compiler les analyseurs et **exige 0.26.1 au minimum**, alors que le paquet `tree-sitter-cli` de noble en est resté à 0.20.8. Sans lui, chaque démarrage de Neovim affiche `Error during "tree-sitter build" : ENOENT`.
 
 Neovim livre déjà les analyseurs Treesitter `markdown` et `markdown_inline` : le Markdown fonctionne sans rien télécharger. Les analyseurs Python, Bash, JSON, YAML et TOML sont récupérés au premier démarrage, ce qui **demande un accès réseau**. En cas d’échec, Neovim démarre quand même et la coloration retombe sur la syntaxe classique pour ces langages.
 
@@ -339,7 +344,7 @@ bash -n build-iso.sh scripts/install-desktop.sh
 python3 -m py_compile scripts/*.py tests/*.py
 ```
 
-Les contrôles locaux comprennent **77 tests unitaires réussis**, la syntaxe Bash/Python, la vérification des clés Pop Shell sur les sources épinglées, le rendu de **22 palettes avec appels GNOME simulés** et la présence de **71 noms de paquets** dans les index Noble AMD64. Ces résultats ne prouvent ni la résolution APT complète ni le bon fonctionnement graphique.
+Les contrôles locaux comprennent **84 tests unitaires réussis**, la syntaxe Bash/Python, la vérification des clés Pop Shell sur les sources épinglées, le rendu de **22 palettes avec appels GNOME simulés** et la présence de **71 noms de paquets** dans les index Noble AMD64. Ces résultats ne prouvent ni la résolution APT complète ni le bon fonctionnement graphique.
 
 Contrôles supplémentaires de cette itération : la configuration Neovim a été exécutée par le **vrai Neovim 0.12.5 épinglé**, en mode headless, réseau ouvert — les cinq greffons s'installent, `pylsp` et `ruff` s'attachent à un fichier Python et remontent des diagnostics, `marksman` et `render-markdown` s'attachent à un fichier Markdown dont l'analyseur Treesitter démarre, le thème se charge. Le téléchargement des analyseurs Treesitter supplémentaires **n'a pas pu être vérifié** : le réseau de l'environnement de développement refuse `codeload.github.com` en HTTP 403. `ubunturiri-doctor` a été exécuté sur un système partiellement équipé et rend bien compte de l'état réel.
 

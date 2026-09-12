@@ -71,6 +71,23 @@ def sortie(commande):
     return resultat.stdout.strip() if resultat.returncode == 0 else None
 
 
+def etat_unite(unite):
+    """État d'une unité systemd, y compris quand la commande sort en erreur.
+
+    « systemctl is-enabled » renvoie 1 pour une unité masquée ou désactivée et
+    4 pour une unité inexistante, tout en écrivant l'état sur la sortie
+    standard. Se fier au seul code de retour ferait passer « masked » pour une
+    absence d'information.
+    """
+    try:
+        resultat = subprocess.run(["systemctl", "is-enabled", unite],
+                                  capture_output=True, text=True, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    etat = resultat.stdout.strip()
+    return etat or None
+
+
 def gsettings(schema, cle):
     return sortie(["gsettings", "get", schema, cle])
 
@@ -117,7 +134,7 @@ def controler_reseau(r):
         r.echec("réseau", "fichier netplan du profil absent",
                 "session_setup.py n'a pas tourné")
 
-    etat = sortie(["systemctl", "is-enabled", "systemd-networkd-wait-online.service"])
+    etat = etat_unite("systemd-networkd-wait-online.service")
     if etat == "masked":
         r.ok("réseau", "attente systemd-networkd retirée")
     else:
@@ -188,12 +205,40 @@ def controler_applications(r):
 
 def controler_lsp(r):
     for binaire, role in [("pylsp", "Python"), ("ruff", "Python, lint et format"), ("marksman", "Markdown")]:
-        chemin = shutil.which(binaire)
-        if chemin:
+        if shutil.which(binaire):
             r.ok("neovim", f"serveur LSP {binaire} ({role})")
         else:
             r.echec("neovim", f"serveur LSP {binaire} absent",
                     f"la configuration Neovim l'active pour {role}")
+
+    # nvim-treesitter branche main appelle « tree-sitter build » : sans le
+    # binaire, chaque démarrage affiche une erreur ENOENT et aucun analyseur
+    # n'est compilé. Le paquet de noble, en 0.20.8, est sous le minimum de
+    # 0.26.1 exigé en amont.
+    version = sortie(["tree-sitter", "--version"])
+    if version is None:
+        r.echec("neovim", "CLI tree-sitter absent",
+                "nvim-treesitter ne peut compiler aucun analyseur ; erreur ENOENT à chaque démarrage")
+    else:
+        numero = version.split()[-1]
+        composants = [int(n) for n in numero.split(".")[:2] if n.isdigit()]
+        if composants < [0, 26]:
+            r.echec("neovim", f"CLI tree-sitter {numero}, trop ancien",
+                    "nvim-treesitter branche main exige 0.26.1 au minimum")
+        else:
+            r.ok("neovim", f"CLI tree-sitter {numero}")
+
+    analyseurs = sorted(
+        chemin.stem
+        for base in [Path.home() / ".local/share/nvim/site/parser"]
+        if base.is_dir()
+        for chemin in base.glob("*.so")
+    )
+    if analyseurs:
+        r.ok("neovim", f"analyseurs Treesitter compilés : {', '.join(analyseurs)}")
+    else:
+        r.ignore("neovim", "analyseurs Treesitter",
+                 "aucun compilé ; ils le seront au prochain démarrage de nvim, avec réseau")
 
     config = Path.home() / ".config/nvim/init.lua"
     if config.is_file():
@@ -216,7 +261,7 @@ def controler_lsp(r):
 
 def controler_maintenance(r):
     if Path("/usr/bin/unattended-upgrade").exists():
-        etat = sortie(["systemctl", "is-enabled", "unattended-upgrades.service"])
+        etat = etat_unite("unattended-upgrades.service")
         if etat == "enabled":
             r.ok("maintenance", "mises à jour de sécurité automatiques actives")
         else:
@@ -242,6 +287,19 @@ def main():
     parser = argparse.ArgumentParser(description="Contrôler la conformité du poste au profil ubunturiri.")
     parser.add_argument("--quiet", action="store_true", help="n'afficher que les échecs")
     args = parser.parse_args()
+
+    # Aucun contrôle n'exige de privilèges, et la moitié porte sur le compte :
+    # sous sudo, Path.home() vaut /root et gsettings lit la configuration de
+    # root. Les contrôles shell, Neovim et Pop Shell rendraient alors un verdict
+    # faux. Mieux vaut refuser que mentir.
+    if os.geteuid() == 0:
+        compte = os.environ.get("SUDO_USER")
+        print("ubunturiri-doctor ne doit pas être lancé en root : les contrôles du shell,",
+              "de Neovim et de Pop Shell porteraient sur le compte root, pas sur le vôtre.",
+              sep="\n", file=sys.stderr)
+        if compte:
+            print(f"\nRelancer simplement :  ubunturiri-doctor", file=sys.stderr)
+        return 2
 
     r = Rapport(quiet=args.quiet)
     if not args.quiet:

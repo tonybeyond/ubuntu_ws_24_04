@@ -163,11 +163,18 @@ tar -xzf "$PAYLOAD/extras/ruff.tar.gz" -C /usr/local/bin --strip-components=1 \
   ruff-x86_64-unknown-linux-gnu/ruff
 chmod 0755 /usr/local/bin/ruff
 install -m 0755 "$PAYLOAD/extras/marksman" /usr/local/bin/marksman
-for binary in pylsp ruff marksman; do
-  command -v "$binary" >/dev/null || { printf '%s\n' "Serveur LSP absent après installation : $binary" >&2; exit 1; }
+# nvim-treesitter branche main appelle « tree-sitter build » pour compiler les
+# analyseurs ; sans ce binaire, chaque démarrage de Neovim affiche une erreur
+# ENOENT. Le paquet tree-sitter-cli de noble est en 0.20.8, sous le minimum de
+# 0.26.1 exigé par nvim-treesitter : il faut la version amont.
+gunzip -c "$PAYLOAD/extras/tree-sitter.gz" > /usr/local/bin/tree-sitter
+chmod 0755 /usr/local/bin/tree-sitter
+for binary in pylsp ruff marksman tree-sitter; do
+  command -v "$binary" >/dev/null || { printf '%s\n' "Outil Neovim absent après installation : $binary" >&2; exit 1; }
 done
 /usr/local/bin/ruff --version
 /usr/local/bin/marksman --version
+/usr/local/bin/tree-sitter --version
 
 step 'Mises à jour de sécurité automatiques'
 apt-get install --no-install-recommends -y $(python3 "$PAYLOAD/packages.py" --apt securite)

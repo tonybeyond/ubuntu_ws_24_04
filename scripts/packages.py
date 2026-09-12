@@ -65,6 +65,12 @@ PINS = {
         "sha256": "0696335ef16615d8c7445ad438750eb0f55b3da6f153df21265a7c6d5750254f",
         "note": "absent de noble ; diagnostics et formatage Python pour Neovim, via « ruff server »",
     },
+    "extras/tree-sitter.gz": {
+        "version": "0.26.9",
+        "url": "https://github.com/tree-sitter/tree-sitter/releases/download/v0.26.9/tree-sitter-linux-x64.gz",
+        "sha256": "9ce82137caa65864e7ca8b869fd391cef88c9bd2a01c4371b9c4dd26c2585efb",
+        "note": "exigé par nvim-treesitter branche main, qui demande 0.26.1 au minimum ; noble n'a que 0.20.8",
+    },
     "extras/marksman": {
         "version": "2026-02-08",
         "url": "https://github.com/artempyanykh/marksman/releases/download/2026-02-08/marksman-linux-x64",

@@ -766,6 +766,39 @@ class DoctorTests(unittest.TestCase):
     def test_missing_command_never_raises(self):
         self.assertIsNone(self.doctor.sortie(["/commande/qui/nexiste/pas"]))
 
+    def test_root_is_refused(self):
+        # Sous sudo, Path.home() vaut /root et gsettings lit la configuration de
+        # root : les contrôles shell, Neovim et Pop Shell rendraient un verdict
+        # faux. Mieux vaut refuser que mentir.
+        with patch("doctor.os.geteuid", return_value=0), \
+             patch.dict("doctor.os.environ", {"SUDO_USER": "uby"}, clear=False), \
+             patch("doctor.sys.argv", ["ubunturiri-doctor"]), \
+             contextlib.redirect_stderr(io.StringIO()) as erreurs:
+            self.assertEqual(self.doctor.main(), 2)
+        self.assertIn("ne doit pas être lancé en root", erreurs.getvalue())
+
+    def test_masked_unit_is_read_despite_the_exit_code(self):
+        # « systemctl is-enabled » sort en 1 pour une unité masquée tout en
+        # écrivant « masked » : se fier au code de retour faisait passer le
+        # masquage pour une absence d'information, et le contrôle réseau
+        # échouait à tort sur un système correctement configuré.
+        faux = subprocess.CompletedProcess([], 1, stdout="masked\n", stderr="")
+        with patch("doctor.subprocess.run", return_value=faux):
+            self.assertEqual(self.doctor.etat_unite("peu-importe.service"), "masked")
+        absent = subprocess.CompletedProcess([], 4, stdout="", stderr="")
+        with patch("doctor.subprocess.run", return_value=absent):
+            self.assertIsNone(self.doctor.etat_unite("peu-importe.service"))
+
+    def test_network_check_uses_the_robust_helper(self):
+        source = (build_iso.ROOT / "scripts/doctor.py").read_text()
+        self.assertIn('etat_unite("systemd-networkd-wait-online.service")', source)
+        self.assertNotIn('sortie(["systemctl", "is-enabled"', source)
+
+    def test_treesitter_cli_is_checked(self):
+        source = (build_iso.ROOT / "scripts/doctor.py").read_text()
+        self.assertIn("CLI tree-sitter absent", source)
+        self.assertIn("[0, 26]", source)
+
     def test_exposed_as_a_command(self):
         source = (build_iso.ROOT / "scripts/session_setup.py").read_text()
         self.assertIn('("ubunturiri-doctor", "doctor.py")', source)
@@ -823,6 +856,26 @@ class NeovimConfigTests(unittest.TestCase):
         shell = (build_iso.ROOT / "scripts/shell_setup.py").read_text()
         self.assertIn('copier_arbre(FILES / "nvim", home / ".config/nvim")', shell)
         self.assertIn('copier_arbre(FILES / "nvim", SKEL / ".config/nvim")', shell)
+
+
+class TreeSitterCliTests(unittest.TestCase):
+
+    def test_cli_is_pinned_above_the_required_version(self):
+        pin = packages.PINS["extras/tree-sitter.gz"]
+        majeur, mineur = (int(n) for n in pin["version"].split(".")[:2])
+        self.assertGreaterEqual([majeur, mineur], [0, 26], "nvim-treesitter exige 0.26.1 au minimum")
+        self.assertIn("tree-sitter", pin["url"])
+
+    def test_cli_is_installed_before_the_first_nvim_launch(self):
+        installateur = (build_iso.ROOT / "scripts/install-desktop.sh").read_text()
+        self.assertIn('gunzip -c "$PAYLOAD/extras/tree-sitter.gz" > /usr/local/bin/tree-sitter', installateur)
+        self.assertIn("for binary in pylsp ruff marksman tree-sitter; do", installateur)
+        self.assertIn("/usr/local/bin/tree-sitter --version", installateur)
+
+    def test_apt_package_is_not_used(self):
+        # tree-sitter-cli existe dans noble, en 0.20.8 : sous le minimum exigé.
+        for groupe in packages.APT_GROUPS.values():
+            self.assertNotIn("tree-sitter-cli", groupe)
 
 
 class BashrcTests(unittest.TestCase):
