@@ -1,13 +1,16 @@
 import contextlib
+import hashlib
+import http.server
 import io
 import json
 import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import build_iso
@@ -18,8 +21,8 @@ import theme
 
 HASH = "$6$simulation$" + "a" * 86
 
-
 class PreflightTests(unittest.TestCase):
+
     def test_root_policy_and_cli(self):
         with patch("build_iso.platform.system", return_value="Linux"), patch("build_iso.platform.freedesktop_os_release", return_value={"ID": "ubuntu", "VERSION_ID": "24.04"}), patch("build_iso.sys.version_info", (3, 12)), patch("build_iso.shutil.which", return_value="/usr/bin/tool"), patch.object(Path, "is_file", return_value=True), patch("build_iso.os.geteuid", return_value=0), patch("build_iso.os.umask"), contextlib.redirect_stdout(io.StringIO()) as output:
             with self.assertRaisesRegex(ValueError, "--allow-root"):
@@ -34,7 +37,6 @@ class PreflightTests(unittest.TestCase):
             with patch("build_iso.shutil.which", return_value=None):
                 with self.assertRaises(ValueError):
                     build_iso.main(["--allow-root", "--check"])
-
 
 class ConfigurationTests(unittest.TestCase):
     def test_identity_validation(self):
@@ -141,6 +143,35 @@ class ConfigurationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 build_iso.prompt_hash()
 
+    def test_password_too_short(self):
+        with patch("build_iso.sys.stdin.isatty", return_value=True), patch("build_iso.getpass.getpass", side_effect=["sim1234", "sim1234"]):
+            with self.assertRaises(ValueError):
+                build_iso.prompt_hash()
+
+    def test_password_minimum_length_accepted(self):
+        completed = subprocess.CompletedProcess([], 0, stdout=HASH + "\n", stderr="")
+        with patch("build_iso.sys.stdin.isatty", return_value=True), patch("build_iso.getpass.getpass", return_value="simul123"), patch("build_iso.run", return_value=completed):
+            self.assertEqual(build_iso.prompt_hash(), HASH)
+
+    def test_username_interactive_default(self):
+        with patch("build_iso.sys.stdin.isatty", return_value=True), patch("build_iso.input", return_value=""):
+            result = build_iso.prompt_username("ubunturiri")
+            self.assertEqual(result, "ubunturiri")
+
+    def test_username_interactive_custom(self):
+        with patch("build_iso.sys.stdin.isatty", return_value=True), patch("build_iso.input", return_value="moncompte"):
+            result = build_iso.prompt_username("ubunturiri")
+            self.assertEqual(result, "moncompte")
+
+    def test_username_pipe_rejected(self):
+        with patch("build_iso.sys.stdin.isatty", return_value=False):
+            with self.assertRaises(ValueError):
+                build_iso.prompt_username("ubunturiri")
+
+    def test_username_invalid_rejected(self):
+        with patch("build_iso.sys.stdin.isatty", return_value=True), patch("build_iso.input", return_value="root"):
+            with self.assertRaises(ValueError):
+                build_iso.prompt_username("ubunturiri")
 
 class AssemblyTests(unittest.TestCase):
     def test_assembly_maps_and_boot_order(self):
@@ -182,7 +213,6 @@ class AssemblyTests(unittest.TestCase):
             destination.mkdir()
             result = build_iso.unpack(archive, destination)
             self.assertEqual((result / "link").read_bytes(), b"x")
-
 
 class SessionTests(unittest.TestCase):
     def test_citrix_restore_exact_values(self):
@@ -231,6 +261,208 @@ class SessionTests(unittest.TestCase):
             config = json.loads((home / ".config/pop-shell/config.json").read_text())
             self.assertIn("wfica", config["float"][0]["class"])
             self.assertTrue((home / ".local/state/ubunturiri/configured").exists())
+
+class DownloadTests(unittest.TestCase):
+    def test_download_complete_200_ok(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            content = b"test file content for download"
+
+            target = root / "downloaded.bin"
+            url = "https://example.com/test"
+            with patch("build_iso.urllib.request.urlopen") as mock_urlopen:
+                mock_response = MagicMock()
+                mock_response.status = 200
+                mock_response.geturl.return_value = "https://example.com/test"
+                mock_response.headers = {"Content-Length": str(len(content))}
+                mock_response.read = MagicMock(side_effect=[content, b""])
+                mock_response.__enter__ = MagicMock(return_value=mock_response)
+                mock_response.__exit__ = MagicMock(return_value=False)
+                mock_urlopen.return_value = mock_response
+
+                build_iso.download(url, target)
+                self.assertEqual(target.read_bytes(), content)
+                self.assertFalse((Path(str(target) + ".part")).exists())
+
+    def test_download_partial_206_resume(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            full_content = b"0123456789" * 100
+            part1 = full_content[:500]
+            part2 = full_content[500:]
+
+            target = root / "downloaded.bin"
+            target_part = Path(str(target) + ".part")
+            target_part.write_bytes(part1)
+
+            url = "https://example.com/file"
+            with patch("build_iso.urllib.request.urlopen") as mock_urlopen:
+                mock_response = MagicMock()
+                mock_response.status = 206
+                mock_response.geturl.return_value = "https://example.com/file"
+                mock_response.headers = {
+                    "Content-Length": str(len(part2)),
+                    "Content-Range": f"bytes 500-{len(full_content)-1}/{len(full_content)}"
+                }
+                mock_response.read = MagicMock(side_effect=[part2, b""])
+                mock_response.__enter__ = MagicMock(return_value=mock_response)
+                mock_response.__exit__ = MagicMock(return_value=False)
+                mock_urlopen.return_value = mock_response
+
+                build_iso.download(url, target)
+                self.assertEqual(target.read_bytes(), full_content)
+                self.assertFalse(target_part.exists())
+
+    def test_download_200_instead_of_206_truncates(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            full_content = b"0123456789" * 100
+            part1 = full_content[:500]
+            target = root / "downloaded.bin"
+            target_part = Path(str(target) + ".part")
+            target_part.write_bytes(part1)
+
+            url = "https://example.com/file"
+            with patch("build_iso.urllib.request.urlopen") as mock_urlopen:
+                call_count = [0]
+                def urlopen_side_effect(request, timeout=None):
+                    call_count[0] += 1
+                    response = MagicMock()
+                    response.geturl.return_value = "https://example.com/file"
+                    response.status = 200
+                    response.headers = {"Content-Length": str(len(full_content))}
+                    response.__enter__ = MagicMock(return_value=response)
+                    response.__exit__ = MagicMock(return_value=False)
+                    response.read = MagicMock(side_effect=[full_content, b""])
+                    return response
+
+                mock_urlopen.side_effect = urlopen_side_effect
+                build_iso.download(url, target)
+                self.assertEqual(target.read_bytes(), full_content)
+                self.assertEqual(call_count[0], 1)
+
+    def test_download_416_retry_without_range(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            full_content = b"0123456789" * 100
+            part1 = full_content[:500]
+            target = root / "downloaded.bin"
+            target_part = Path(str(target) + ".part")
+            target_part.write_bytes(part1)
+
+            url = "https://example.com/file"
+            with patch("build_iso.urllib.request.urlopen") as mock_urlopen:
+                call_count = [0]
+                def urlopen_side_effect(request, timeout=None):
+                    call_count[0] += 1
+                    if call_count[0] == 1:
+                        raise build_iso.urllib.error.HTTPError(url, 416, "Range Not Satisfiable", {}, None)
+                    response = MagicMock()
+                    response.geturl.return_value = "https://example.com/file"
+                    response.status = 200
+                    response.headers = {"Content-Length": str(len(full_content))}
+                    response.__enter__ = MagicMock(return_value=response)
+                    response.__exit__ = MagicMock(return_value=False)
+                    response.read = MagicMock(side_effect=[full_content, b""])
+                    return response
+
+                mock_urlopen.side_effect = urlopen_side_effect
+                build_iso.download(url, target)
+                self.assertEqual(target.read_bytes(), full_content)
+                self.assertEqual(call_count[0], 2)
+
+    def test_download_206_content_range_validation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "downloaded.bin"
+            target_part = Path(str(target) + ".part")
+            target_part.write_bytes(b"partial")
+
+            url = "https://example.com/file"
+            with patch("build_iso.urllib.request.urlopen") as mock_urlopen:
+                mock_response = MagicMock()
+                mock_response.status = 206
+                mock_response.geturl.return_value = "https://example.com/file"
+                mock_response.headers = {
+                    "Content-Length": "50",
+                    "Content-Range": "bytes 7-106/200"
+                }
+                mock_response.read = MagicMock(side_effect=[b"x" * 50, b""])
+                mock_response.__enter__ = MagicMock(return_value=mock_response)
+                mock_response.__exit__ = MagicMock(return_value=False)
+                mock_urlopen.return_value = mock_response
+
+                with self.assertRaisesRegex(ValueError, "Content-Range incohérente"):
+                    build_iso.download(url, target)
+
+    def test_download_206_missing_content_range(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "downloaded.bin"
+            target_part = Path(str(target) + ".part")
+            target_part.write_bytes(b"partial")
+
+            url = "https://example.com/file"
+            with patch("build_iso.urllib.request.urlopen") as mock_urlopen:
+                mock_response = MagicMock()
+                mock_response.status = 206
+                mock_response.geturl.return_value = "https://example.com/file"
+                mock_response.headers = {"Content-Length": "100"}
+                mock_response.__enter__ = MagicMock(return_value=mock_response)
+                mock_response.__exit__ = MagicMock(return_value=False)
+                mock_urlopen.return_value = mock_response
+
+                with self.assertRaisesRegex(ValueError, "Content-Range"):
+                    build_iso.download(url, target)
+
+    def test_check_space_sufficient(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            result = build_iso.check_space(root, 1024)
+            self.assertTrue(result)
+
+    def test_check_space_insufficient(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            huge_size = 1024 ** 4
+            with self.assertRaisesRegex(ValueError, "Espace insuffisant"):
+                build_iso.check_space(root, huge_size)
+
+    def test_check_space_calculated_needs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            needed = int(3.9 * (1024 ** 3) + 2 * 325 * (1024 ** 2) + 512 * (1024 ** 2))
+            with patch("shutil.disk_usage") as mock_du:
+                mock_du.return_value = unittest.mock.MagicMock(free=14 * (1024 ** 3))
+                result = build_iso.check_space(root, needed)
+                self.assertTrue(result)
+            with patch("shutil.disk_usage") as mock_du:
+                mock_du.return_value = unittest.mock.MagicMock(free=int(3.5 * (1024 ** 3)))
+                with self.assertRaisesRegex(ValueError, "Espace insuffisant"):
+                    build_iso.check_space(root, needed)
+
+    def test_official_iso_cache_reuse(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory)
+            iso_name = "ubuntu-24.04.1-live-server-amd64.iso"
+            iso_path = cache / iso_name
+            iso_content = b"fake iso content for testing cache reuse"
+            iso_path.write_bytes(iso_content)
+            iso_digest = hashlib.sha256(iso_content).hexdigest()
+            sha256_content = f"{iso_digest}  {iso_name}\n"
+
+            with patch("build_iso.download") as mock_download, \
+                 patch("build_iso.run") as mock_run, \
+                 patch("build_iso.select_iso", return_value=(iso_name, iso_digest)):
+                mock_download.side_effect = lambda url, path, resume=True: (
+                    path.write_text(sha256_content) if "SHA256SUMS" in str(url) else None
+                )
+
+                result = build_iso.official_iso(cache, None)
+                self.assertEqual(result, iso_path)
+                self.assertEqual(iso_path.read_bytes(), iso_content)
+                mock_run.assert_called_once()
+                mock_download.assert_called()
 
 
 if __name__ == "__main__":

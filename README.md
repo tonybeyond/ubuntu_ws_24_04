@@ -26,7 +26,7 @@ L’installation GNOME utilise des paquets sélectionnés avec `--no-install-rec
 
 - Une machine ou VM **Ubuntu 24.04**, de préférence AMD64, pour construire. Un CT Ubuntu 24.04 dédié convient aussi pour préparer l’ISO. Le script refuse macOS et les autres distributions ; root est refusé par défaut, sauf avec `--allow-root`.
 - Python **3.12 ou ultérieur** et les outils indiqués ci-dessous.
-- Au moins **15 Gio libres**, seuil minimal contrôlé par le script ; prévoir davantage pour une VM de test.
+- Espace disque suffisant pour les fichiers temporaires et l'ISO finale. Le script vérifie dynamiquement après téléchargement de l'ISO Ubuntu et préparation du contenu (source + 2× payload + marge de 5% ou 512 Mio minimum). Les téléchargements sont repris en cas d'interruption (HTTP Range) ; une ISO partiellement téléchargée dans le cache n'est pas effacée et peut être complétée.
 - Une connexion Internet pour la construction **et pour l’installation**.
 - Le paquet DEB AMD64 de Citrix Workspace, téléchargé depuis [Citrix](https://www.citrix.com/downloads/workspace-app/linux/), dans le respect de sa licence.
 
@@ -63,7 +63,7 @@ Le CT sert à préparer l’ISO. Le démarrage, l’installation chiffrée et le
 
 ### Déroulement de la construction
 
-Le script télécharge les sources épinglées et l’ISO Ubuntu courante de la série 24.04, vérifie la signature du manifeste Ubuntu et son SHA-256, puis demande deux fois le mot de passe utilisateur dans le terminal, sans l’afficher. Le mot de passe doit comporter au moins 12 caractères.
+Le script télécharge les sources épinglées et l'ISO Ubuntu courante de la série 24.04, vérifie la signature du manifeste Ubuntu et son SHA-256. Il demande ensuite le nom d'utilisateur (défaut : ubunturiri) : appuyer sur Entrée pour accepter ou saisir un autre nom valide. Après la préparation des sources, le mot de passe utilisateur est demandé deux fois, sans l'afficher. Le mot de passe doit comporter au moins 8 caractères.
 
 Après une construction réussie, les sorties prévues sont :
 
@@ -83,6 +83,10 @@ bash build-iso.sh --citrix-deb "/chemin/vers/icaclient_amd64.deb" \
 ```
 
 L’option `--iso /chemin/vers/ubuntu-24.04.x-live-server-amd64.iso` permet de réutiliser une ISO téléchargée. Son nom et son empreinte doivent correspondre à la version actuellement référencée dans le manifeste signé officiel : une ancienne révision sera refusée. La vérification nécessite toujours Internet.
+
+#### Téléchargements et cache
+
+Les sources et l'ISO Ubuntu sont conservées dans `.cache/` à la racine du projet. En cas d'interruption (Ctrl+C, délai d'attente, erreur réseau), les fichiers partiellement téléchargés restent en place avec l'extension `.part`. Un nouveau lancement du script reprend le téléchargement à partir du dernier octet reçu, grâce au support HTTP Range. Si le serveur refuse la reprise (réponse 416 ou absence de Range), le fichier est retéléchargé en intégralité. Le cache n'est pas effacé automatiquement après la construction : le réutiliser pour plusieurs ISO réduit la consommation réseau.
 
 ## Installation et chiffrement
 
@@ -162,7 +166,7 @@ bash -n build-iso.sh scripts/install-desktop.sh
 python3 -m py_compile scripts/*.py tests/*.py
 ```
 
-Les contrôles locaux effectués lors de la préparation initiale comprennent **18 tests unitaires réussis**, la syntaxe Bash/Python, la vérification des clés Pop Shell sur les sources épinglées, le rendu de **22 palettes avec appels GNOME simulés** et la présence de **49 noms de paquets** dans les index Noble AMD64. Ces résultats ne prouvent ni la résolution APT complète ni le bon fonctionnement graphique.
+Les contrôles locaux effectués lors de la préparation initiale comprennent **36 tests unitaires réussis**, la syntaxe Bash/Python, la vérification des clés Pop Shell sur les sources épinglées, le rendu de **22 palettes avec appels GNOME simulés** et la présence de **49 noms de paquets** dans les index Noble AMD64. Ces résultats ne prouvent ni la résolution APT complète ni le bon fonctionnement graphique.
 
 Le contrôle complémentaire `python3 tests/check_sources.py DOSSIER` attend dans ce dossier les archives `pop-shell.tar.gz` et `fedoriri.tar.gz` correspondant aux commits ci-dessous, ainsi que `main.xz` et `universe.xz`, index `Packages.xz` Noble AMD64 des composants correspondants. Il ne les télécharge pas.
 

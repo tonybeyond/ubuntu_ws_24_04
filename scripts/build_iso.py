@@ -28,21 +28,66 @@ def sha256(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def download(url, path):
-    request = urllib.request.Request(url, headers={"User-Agent": "ubunturiri-ISO/1"})
+def download(url, path, resume=True):
     temporary = Path(str(path) + ".part")
+    offset = temporary.stat().st_size if resume and temporary.exists() else 0
+    request = urllib.request.Request(url, headers={"User-Agent": "ubunturiri-ISO/1", "Accept-Encoding": "identity"})
+    if offset:
+        request.add_header("Range", f"bytes={offset}-")
     try:
-        with urllib.request.urlopen(request, timeout=120) as source, temporary.open("wb") as destination:
-            if not source.geturl().startswith("https://"):
-                raise ValueError("Téléchargement non HTTPS refusé.")
-            shutil.copyfileobj(source, destination)
-        temporary.replace(path)
-    finally:
-        temporary.unlink(missing_ok=True)
+        source = urllib.request.urlopen(request, timeout=120)
+    except urllib.error.HTTPError as error:
+        if error.code != 416 or not offset:
+            raise
+        error.close()
+        request.remove_header("Range")
+        offset = 0
+        source = urllib.request.urlopen(request, timeout=120)
+    with source:
+        if not source.geturl().startswith("https://"):
+            raise ValueError("Téléchargement non HTTPS refusé.")
+        length = source.headers.get("Content-Length")
+        expected = int(length) if length is not None else None
+        if expected is not None and expected < 0:
+            raise ValueError("Longueur de téléchargement invalide.")
+        if source.status == 206:
+            match = re.fullmatch(r"bytes (\d+)-(\d+)/(\d+)", source.headers.get("Content-Range", ""))
+            if not offset or not match:
+                raise ValueError("Réponse Content-Range invalide.")
+            start, end, total = map(int, match.groups())
+            if start != offset or end < start or end != total - 1 or (expected is not None and expected != end - start + 1):
+                raise ValueError("Réponse Content-Range incohérente.")
+            expected = end - start + 1
+            mode = "ab"
+        elif source.status == 200:
+            offset = 0
+            mode = "wb"
+        else:
+            raise ValueError("Statut HTTP inattendu.")
+        reusable = temporary.stat().st_size if mode == "wb" and temporary.exists() else 0
+        check_space(path.parent, max(0, (expected or 0) - reusable) + 256 * 1024 ** 2)
+        received = 0
+        with temporary.open(mode) as destination:
+            while chunk := source.read(1024 ** 2):
+                check_space(path.parent, len(chunk) + 16 * 1024 ** 2)
+                destination.write(chunk)
+                received += len(chunk)
+        if expected is not None and received != expected:
+            raise ValueError("Téléchargement incomplet ; fichier .part conservé pour reprise.")
+    temporary.replace(path)
 
 
 def run(arguments, **kwargs):
     return subprocess.run([str(value) for value in arguments], check=True, **kwargs)
+
+
+def check_space(path, required_bytes):
+    available = shutil.disk_usage(path).free
+    if available < required_bytes:
+        available_gb = available / (1024 ** 3)
+        required_gb = required_bytes / (1024 ** 3)
+        raise ValueError(f"Espace insuffisant sur {path} : {available_gb:.1f} Gio libres, {required_gb:.1f} Gio nécessaires. Le cache est conservé ; déplacer la sortie avec --output ou fournir une ISO existante avec --iso.")
+    return True
 
 
 def preflight(allow_root=False):
@@ -75,8 +120,8 @@ def select_iso(checksums):
 
 
 def official_iso(cache, supplied):
-    download(RELEASE + "SHA256SUMS", cache / "SHA256SUMS")
-    download(RELEASE + "SHA256SUMS.gpg", cache / "SHA256SUMS.gpg")
+    download(RELEASE + "SHA256SUMS", cache / "SHA256SUMS", resume=False)
+    download(RELEASE + "SHA256SUMS.gpg", cache / "SHA256SUMS.gpg", resume=False)
     run(["gpgv", "--keyring", KEYRING, cache / "SHA256SUMS.gpg", cache / "SHA256SUMS"])
     name, digest = select_iso((cache / "SHA256SUMS").read_text())
     path = supplied.resolve() if supplied else cache / name
@@ -108,7 +153,7 @@ def unpack(archive, destination):
     return roots[0]
 
 
-def prepare_payload(work, citrix):
+def prepare_payload(work, citrix, cache):
     payload = work / "payload"
     payload.mkdir()
     for name in ["iso_config.py", "install-desktop.sh", "session_setup.py", "theme.py", "citrix_mode.py"]:
@@ -119,10 +164,15 @@ def prepare_payload(work, citrix):
         value = run(["dpkg-deb", "--field", citrix, field], capture_output=True, text=True).stdout.strip()
         if value != expected:
             raise ValueError("Le paquet fourni n’est pas Citrix Workspace AMD64 (icaclient).")
+    check_space(work, citrix.stat().st_size + 256 * 1024 ** 2)
     shutil.copy2(citrix, payload / "icaclient.deb")
     for name, repository, commit in [("pop-shell", "pop-os/shell", POP_COMMIT), ("fedoriri", "tonybeyond/fedoriri", THEME_COMMIT)]:
-        archive = work / f"{name}.tar.gz"
-        download(f"https://codeload.github.com/{repository}/tar.gz/{commit}", archive)
+        archive = cache / f"{name}-{commit}.tar.gz"
+        if not archive.is_file():
+            download(f"https://codeload.github.com/{repository}/tar.gz/{commit}", archive)
+        with tarfile.open(archive) as contents:
+            expanded = sum(member.size for member in contents if member.isfile())
+        check_space(work, 2 * expanded + 256 * 1024 ** 2)
         extracted = work / f"{name}-source"
         extracted.mkdir()
         source = unpack(archive, extracted)
@@ -134,7 +184,10 @@ def prepare_payload(work, citrix):
         else:
             shutil.copytree(source / "desktop/themes", payload / "themes")
             shutil.copy2(source / "LICENSE", payload / "LICENSE-fedoriri")
-    download("https://raw.githubusercontent.com/basecamp/omarchy/v4.0.0/LICENSE", payload / "LICENSE-Omarchy")
+    license_path = cache / "LICENSE-Omarchy-v4.0.0"
+    if not license_path.is_file():
+        download("https://raw.githubusercontent.com/basecamp/omarchy/v4.0.0/LICENSE", license_path)
+    shutil.copy2(license_path, payload / "LICENSE-Omarchy")
     files = {str(path.relative_to(payload)): sha256(path) for path in sorted(payload.rglob("*")) if path.is_file()}
     manifest = {"pop_shell_commit": POP_COMMIT, "fedoriri_commit": THEME_COMMIT, "files": files}
     (payload / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
@@ -142,13 +195,26 @@ def prepare_payload(work, citrix):
     return payload
 
 
+def prompt_username(default):
+    if not sys.stdin.isatty():
+        raise ValueError("Un terminal interactif est nécessaire pour saisir le nom d'utilisateur.")
+    value = input(f"Nom d'utilisateur ({default}) : ").strip()
+    if not value:
+        value = default
+    try:
+        identity(value, "ubunturiri", "$6$validation$" + "a" * 86)
+    except ValueError as e:
+        raise ValueError(f"Nom d'utilisateur invalide : {e}")
+    return value
+
+
 def prompt_hash():
     if not sys.stdin.isatty():
         raise ValueError("Un terminal interactif est nécessaire pour saisir le mot de passe.")
-    first = getpass.getpass("Mot de passe utilisateur (12 caractères minimum) : ")
+    first = getpass.getpass("Mot de passe utilisateur (8 caractères minimum) : ")
     second = getpass.getpass("Confirmer le mot de passe : ")
-    if first != second or len(first) < 12 or any(char in first for char in "\n\r\x00"):
-        raise ValueError("Les mots de passe doivent correspondre et comporter au moins 12 caractères.")
+    if first != second or len(first) < 8 or any(char in first for char in "\n\r\x00"):
+        raise ValueError("Les mots de passe doivent correspondre et comporter au moins 8 caractères.")
     result = run(["openssl", "passwd", "-6", "-stdin"], input=first + "\n", capture_output=True, text=True)
     del first, second
     return result.stdout.strip()
@@ -201,7 +267,7 @@ def main(argv=None):
     parser.add_argument("--allow-root", action="store_true", help="autoriser explicitement root dans un environnement de construction dédié")
     parser.add_argument("--citrix-deb", type=Path, help="paquet officiel icaclient AMD64 téléchargé depuis Citrix")
     parser.add_argument("--iso", type=Path, help="ISO officielle déjà téléchargée, vérifiée contre le manifeste signé courant")
-    parser.add_argument("--username", default="ubunturiri", help="compte créé dans le système installé (défaut : ubunturiri)")
+    parser.add_argument("--username", default=None, help="compte créé dans le système installé (défaut : ubunturiri, demandé interactivement si absent)")
     parser.add_argument("--hostname", default="ubunturiri", help="nom de machine (défaut : ubunturiri)")
     parser.add_argument("--output", type=Path, default=ROOT / "build/ubunturiri-ubuntu24.04-amd64.iso", help="ISO de sortie, ne doit pas déjà exister")
     args = parser.parse_args(argv)
@@ -211,7 +277,8 @@ def main(argv=None):
         return
     if args.citrix_deb is None:
         parser.error("--citrix-deb est requis ; fournir le paquet DEB officiel Citrix Workspace AMD64.")
-    identity(args.username, args.hostname, "$6$validation$" + "a" * 86)
+    username = args.username if args.username is not None else prompt_username("ubunturiri")
+    identity(username, args.hostname, "$6$validation$" + "a" * 86)
     output = args.output.resolve()
     partial = output.with_suffix(".partial.iso")
     if output.exists() or partial.exists():
@@ -219,16 +286,20 @@ def main(argv=None):
     output.parent.mkdir(parents=True, exist_ok=True)
     cache = ROOT / ".cache"
     cache.mkdir(mode=0o700, exist_ok=True)
-    if shutil.disk_usage(output.parent).free < 15 * 1024 ** 3:
-        raise ValueError("Prévoir au moins 15 Gio libres pour les fichiers temporaires et l’ISO.")
     print("Installation : connexion réseau, sélection du disque et phrase LUKS requises.")
+    print(f"Nom d'utilisateur : {username}")
     print("Le mot de passe utilisateur sera demandé après la préparation des sources.")
     try:
         with tempfile.TemporaryDirectory(prefix="iso-", dir=output.parent) as temporary:
             work = Path(temporary)
-            payload = prepare_payload(work, args.citrix_deb.resolve())
             source = official_iso(cache, args.iso)
-            config = autoinstall(args.username, args.hostname, prompt_hash())
+            payload = prepare_payload(work, args.citrix_deb.resolve(), cache)
+            iso_size = source.stat().st_size
+            payload_size = sum(p.stat().st_size for p in payload.rglob("*") if p.is_file())
+            margin = max(512 * 1024 ** 2, int(iso_size * 0.05))
+            needed = iso_size + 2 * payload_size + margin
+            check_space(output.parent, needed)
+            config = autoinstall(username, args.hostname, prompt_hash())
             assemble(source, work, payload, config, partial)
             verify_iso(partial, work, config)
             partial.chmod(0o600)
