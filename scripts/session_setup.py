@@ -48,6 +48,14 @@ def system(username):
         config.write(stream)
     write(Path("/var/lib/AccountsService/users") / username, "[User]\nSession=gnome-xorg\nXSession=gnome-xorg\nSystemAccount=false\n", 0o600)
     write(Path("/etc/netplan/99-ubunturiri-renderer.yaml"), "network:\n  version: 2\n  renderer: NetworkManager\n", 0o600)
+    # Conséquence du changement de rendu ci-dessus : systemd-networkd n'a plus
+    # aucune interface à configurer, alors que la base Ubuntu Server laisse
+    # systemd-networkd-wait-online activé. Il attend un lien qui n'arrivera
+    # jamais et bloque chaque démarrage jusqu'à son délai d'attente. On retire
+    # l'attente sans toucher à networkd lui-même, et on la remplace par celle
+    # de NetworkManager, qui gère désormais les interfaces.
+    subprocess.run(["systemctl", "mask", "systemd-networkd-wait-online.service"], check=True)
+    subprocess.run(["systemctl", "enable", "NetworkManager-wait-online.service"], check=True)
     for command, script in [("ubunturiri-theme-set", "theme.py"), ("ubunturiri-citrix-mode", "citrix_mode.py")]:
         target = Path("/usr/local/bin") / command
         target.unlink(missing_ok=True)

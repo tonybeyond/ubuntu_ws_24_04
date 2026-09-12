@@ -614,6 +614,53 @@ class ShellSetupTests(unittest.TestCase):
                     shell_setup.configure_user()
 
 
+class NetworkRendererTests(unittest.TestCase):
+
+    def system_calls(self):
+        """Exécute session_setup.system() en simulant la cible, et renvoie les systemctl."""
+        calls = []
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for directory in ["usr/share/xsessions", "etc/gdm3", "etc/netplan", "usr/local/bin",
+                              "var/lib/AccountsService/users", "etc/xdg/autostart", "opt/ubunturiri"]:
+                (root / directory).mkdir(parents=True, exist_ok=True)
+            (root / "usr/share/xsessions/gnome-xorg.desktop").write_text("[Desktop Entry]\n")
+            for script in ["theme.py", "citrix_mode.py"]:
+                (root / "opt/ubunturiri" / script).write_text("#!/usr/bin/env python3\n")
+            real_path = session_setup.Path
+
+            def fake_path(*parts):
+                joined = real_path(*parts)
+                if joined.is_absolute():
+                    return root / joined.relative_to("/")
+                return joined
+
+            with patch("session_setup.os.geteuid", return_value=0), \
+                 patch("session_setup.pwd.getpwnam"), \
+                 patch("session_setup.PAYLOAD", root / "opt/ubunturiri"), \
+                 patch("session_setup.Path", side_effect=fake_path), \
+                 patch("session_setup.subprocess.run", side_effect=lambda args, **kw: calls.append(args)):
+                session_setup.system("ubunturiri")
+        return [call for call in calls if call and call[0] == "systemctl"]
+
+    def test_networkd_wait_online_is_masked_and_replaced(self):
+        calls = self.system_calls()
+        self.assertIn(["systemctl", "mask", "systemd-networkd-wait-online.service"], calls)
+        self.assertIn(["systemctl", "enable", "NetworkManager-wait-online.service"], calls)
+
+    def test_networkd_itself_is_left_alone(self):
+        # Retirer l'attente suffit : changer qui gère les interfaces serait un
+        # effet de bord non demandé.
+        for call in self.system_calls():
+            self.assertNotIn("systemd-networkd.service", call)
+            self.assertNotIn("systemd-networkd.socket", call)
+
+    def test_renderer_switch_and_wait_fix_stay_together(self):
+        source = (build_iso.ROOT / "scripts/session_setup.py").read_text()
+        self.assertLess(source.index("renderer: NetworkManager"),
+                        source.index("systemd-networkd-wait-online.service"))
+
+
 class InstallerDiagnosticsTests(unittest.TestCase):
 
     def setUp(self):

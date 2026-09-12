@@ -188,6 +188,19 @@ sudo netbird up --setup-key <CLÉ>
 netbird status --detail
 ```
 
+### Réseau : rendu netplan et attente au démarrage
+
+Le profil bascule le rendu netplan vers NetworkManager, qui gère alors toutes les interfaces. `systemd-networkd` n'a plus rien à configurer, mais la base Ubuntu Server laisse `systemd-networkd-wait-online.service` activé : il attend un lien qui n'arrivera jamais et **retarde chaque démarrage jusqu'à son délai d'attente**, avec un `Job systemd-networkd-wait-online.service/start running` visible à l'écran.
+
+`session_setup.py` masque donc cette unité et active `NetworkManager-wait-online.service` à la place. `systemd-networkd` lui-même n'est pas touché : seule l'attente est retirée.
+
+Sur une machine déjà installée avec une ISO antérieure au correctif :
+
+```bash
+sudo systemctl mask systemd-networkd-wait-online.service
+sudo systemctl enable NetworkManager-wait-online.service
+```
+
 ### Diagnostic d'une installation qui échoue
 
 `install-desktop.sh` annonce chaque étape et duplique toute sa sortie dans `/var/log/ubunturiri-install.log`, **à l'intérieur de la cible**. Un `trap ERR` nomme la ligne, la commande et le code de retour. Sans cela, Subiquity n'affiche qu'un rapport de plantage et la sortie réelle part dans le journal du système *live*, sous un identifiant `subiquity_log.<pid>`.
@@ -270,7 +283,7 @@ bash -n build-iso.sh scripts/install-desktop.sh
 python3 -m py_compile scripts/*.py tests/*.py
 ```
 
-Les contrôles locaux comprennent **59 tests unitaires réussis**, la syntaxe Bash/Python, la vérification des clés Pop Shell sur les sources épinglées, le rendu de **22 palettes avec appels GNOME simulés** et la présence de **71 noms de paquets** dans les index Noble AMD64. Ces résultats ne prouvent ni la résolution APT complète ni le bon fonctionnement graphique.
+Les contrôles locaux comprennent **62 tests unitaires réussis**, la syntaxe Bash/Python, la vérification des clés Pop Shell sur les sources épinglées, le rendu de **22 palettes avec appels GNOME simulés** et la présence de **71 noms de paquets** dans les index Noble AMD64. Ces résultats ne prouvent ni la résolution APT complète ni le bon fonctionnement graphique.
 
 Contrôles supplémentaires effectués sur les composants ajoutés, hors ISO : téléchargement réel des 9 composants épinglés et correspondance de leurs SHA-256, préparation complète du contenu embarqué avec `verify_payload` (122 fichiers, 72,6 Mio), rejeu des commandes d'extraction `tar` de `install-desktop.sh`, validation de `starship.toml` par le binaire Starship 1.25.1 sans avertissement, contrôle de chaque clé de la configuration Ghostty contre `ghostty(5)` livré dans le paquet, et chargement du bashrc dans un bash interactif réel avec `ble.sh` rattaché. **L'installation dans une cible Ubuntu 24.04 reste à valider.**
 
