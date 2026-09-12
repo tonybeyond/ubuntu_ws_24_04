@@ -29,7 +29,7 @@ def sha256(path):
 
 
 def download(url, path):
-    request = urllib.request.Request(url, headers={"User-Agent": "Fedoriri-Ubuntu-ISO/1"})
+    request = urllib.request.Request(url, headers={"User-Agent": "ubunturiri-ISO/1"})
     temporary = Path(str(path) + ".part")
     try:
         with urllib.request.urlopen(request, timeout=120) as source, temporary.open("wb") as destination:
@@ -198,9 +198,9 @@ def main(argv=None):
     parser.add_argument("--check", action="store_true", help="vérifier uniquement les outils de construction")
     parser.add_argument("--citrix-deb", type=Path, help="paquet officiel icaclient AMD64 téléchargé depuis Citrix")
     parser.add_argument("--iso", type=Path, help="ISO officielle déjà téléchargée, vérifiée contre le manifeste signé courant")
-    parser.add_argument("--username", default="fedo", help="compte créé dans le système installé (défaut : fedo)")
-    parser.add_argument("--hostname", default="fedoriri", help="nom de machine (défaut : fedoriri)")
-    parser.add_argument("--output", type=Path, default=ROOT / "build/fedoriri-ubuntu24.04-amd64.iso", help="ISO de sortie, ne doit pas déjà exister")
+    parser.add_argument("--username", default="ubunturiri", help="compte créé dans le système installé (défaut : ubunturiri)")
+    parser.add_argument("--hostname", default="ubunturiri", help="nom de machine (défaut : ubunturiri)")
+    parser.add_argument("--output", type=Path, default=ROOT / "build/ubunturiri-ubuntu24.04-amd64.iso", help="ISO de sortie, ne doit pas déjà exister")
     args = parser.parse_args(argv)
     os.umask(0o077)
     preflight()

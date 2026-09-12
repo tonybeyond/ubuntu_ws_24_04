@@ -4,7 +4,7 @@ set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 export PYTHONDONTWRITEBYTECODE=1
 USER_NAME="${1:?Nom utilisateur requis}"
-PAYLOAD=/opt/fedoriri
+PAYLOAD=/opt/ubunturiri
 [[ "$EUID" -eq 0 ]] || { printf '%s\n' 'Exécuter dans la cible Ubuntu avec les droits administrateur.' >&2; exit 1; }
 python3 "$PAYLOAD/iso_config.py" verify-payload "$PAYLOAD"
 chmod -R a+rX "$PAYLOAD"
@@ -36,7 +36,7 @@ if [[ -x /opt/Citrix/ICAClient/util/ctx_rehash ]]; then
   /opt/Citrix/ICAClient/util/ctx_rehash
 fi
 printf '%s\n' 'Compilation de Pop Shell pour GNOME 46, sans lancer ni redémarrer GNOME dans le chroot.'
-POP_BUILD="$(mktemp -d /tmp/fedoriri-pop.XXXXXX)"
+POP_BUILD="$(mktemp -d /tmp/ubunturiri-pop.XXXXXX)"
 trap 'rm -rf -- "$POP_BUILD"' EXIT
 cp -a "$PAYLOAD/pop-shell/." "$POP_BUILD/"
 make -C "$POP_BUILD" all

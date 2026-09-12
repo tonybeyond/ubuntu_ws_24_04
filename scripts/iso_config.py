@@ -35,9 +35,9 @@ def autoinstall(username, hostname, password_hash):
         "early-commands": [["python3", "/cdrom/payload/iso_config.py", "verify-payload", "/cdrom/payload"]],
         "late-commands": [
             ["python3", "/cdrom/payload/iso_config.py", "verify-encryption", "/target"],
-            ["mkdir", "-p", "/target/opt/fedoriri"],
-            ["cp", "-a", "/cdrom/payload/.", "/target/opt/fedoriri/"],
-            ["curtin", "in-target", "--target=/target", "--", "bash", "/opt/fedoriri/install-desktop.sh", username],
+            ["mkdir", "-p", "/target/opt/ubunturiri"],
+            ["cp", "-a", "/cdrom/payload/.", "/target/opt/ubunturiri/"],
+            ["curtin", "in-target", "--target=/target", "--", "bash", "/opt/ubunturiri/install-desktop.sh", username],
         ],
     }}
 

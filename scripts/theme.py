@@ -10,7 +10,7 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 from session_setup import POP_ID, settings
 
-THEMES = Path("/opt/fedoriri/themes")
+THEMES = Path("/opt/ubunturiri/themes")
 
 
 def palette(path):
@@ -46,14 +46,14 @@ def apply_theme(name):
     normal = [colors.get(key, colors["foreground"]) for key in order]
     bright = [colors.get("bright_" + key, normal[index]) for index, key in enumerate(order)]
     settings("set", schema, "palette", repr(normal + bright))
-    state = Path.home() / ".local/state/fedoriri/theme"
+    state = Path.home() / ".local/state/ubunturiri/theme"
     state.parent.mkdir(parents=True, exist_ok=True)
     state.write_text(name + "\n")
     print(f"Palette appliquée au fond, au terminal et à Pop Shell : {name}")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Changer les palettes Fedoriri/Omarchy adaptées à GNOME.")
+    parser = argparse.ArgumentParser(description="Changer les palettes ubunturiri adaptées à GNOME.")
     parser._option_string_actions["--help"].help = "afficher cette aide et quitter"
     parser._positionals.title = "arguments"
     parser.add_argument("name", nargs="?", metavar="THÈME")
@@ -70,7 +70,7 @@ def main():
     if args.next:
         if not names:
             raise ValueError("Aucun thème installé.")
-        state = Path.home() / ".local/state/fedoriri/theme"
+        state = Path.home() / ".local/state/ubunturiri/theme"
         current = state.read_text().strip() if state.exists() else ""
         name = names[(names.index(current) + 1) % len(names)] if current in names else names[0]
     else:

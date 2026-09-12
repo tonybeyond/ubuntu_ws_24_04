@@ -1,8 +1,8 @@
-# Ubuntu Workspace 24.04
+# ubunturiri
 
-Scripts de préparation d’une ISO personnelle Ubuntu Server 24.04 LTS AMD64 avec **GNOME sous X11, Pop Shell et Citrix Workspace**, adaptés de [Fedoriri](https://github.com/tonybeyond/fedoriri).
+Scripts de préparation d’une ISO personnelle Ubuntu Server 24.04 LTS AMD64 avec **GNOME sous X11, Pop Shell et Citrix Workspace** : **ubunturiri**.
 
-Le projet conserve une base serveur minimale, le pavage des fenêtres, les palettes Fedoriri/Omarchy et un profil de raccourcis pour Citrix. Il remplace Fedora et Niri par Ubuntu et GNOME Xorg. Shadow.tech n’est pas intégré.
+Le projet conserve une base serveur minimale, le pavage des fenêtres, les palettes adaptées et un profil de raccourcis pour Citrix. Il repose sur Ubuntu et GNOME Xorg. Shadow.tech n’est pas intégré.
 
 > **État : scripts testés localement, installation complète non validée.** Les tests unitaires ne remplacent pas une construction d’ISO, un démarrage en VM ni une connexion Citrix réelle. Ne pas utiliser sur un disque contenant des données sans sauvegarde.
 
@@ -15,12 +15,12 @@ Le projet conserve une base serveur minimale, le pavage des fenêtres, les palet
 | Pavage | Pop Shell, sources épinglées compatibles GNOME 46 |
 | Citrix | Paquet officiel `icaclient` AMD64 fourni à la construction |
 | Langue et clavier | Français suisse : `fr_CH.UTF-8`, clavier `ch+fr` |
-| Compte par défaut | `fedo`, nom de machine `fedoriri`, personnalisables |
+| Compte par défaut | `ubunturiri`, nom de machine `ubunturiri`, personnalisables |
 | Apparence | Tokyo Night par défaut ; palettes adaptées au fond, au terminal et à Pop Shell |
 | Audio et réseau | PipeWire, WirePlumber, NetworkManager, Bluetooth |
 | Sécurité | Racine LUKS exigée, connexion automatique désactivée, pas de serveur SSH installé par ce profil |
 
-L’installation GNOME utilise des paquets sélectionnés avec `--no-install-recommends`, et non le métapaquet Ubuntu Desktop complet. Des outils de compilation restent installés pour Pop Shell. Il ne s’agit pas d’une reproduction intégrale de Fedoriri, ni d’une ISO live de bureau préconfiguré.
+L’installation GNOME utilise des paquets sélectionnés avec `--no-install-recommends`, et non le métapaquet Ubuntu Desktop complet. Des outils de compilation restent installés pour Pop Shell. Il ne s’agit pas d’une adaptation du projet original, ni d’une ISO live de bureau préconfiguré.
 
 ## Prérequis
 
@@ -51,8 +51,8 @@ Le script télécharge les sources épinglées et l’ISO Ubuntu courante de la 
 
 Après une construction réussie, les sorties prévues sont :
 
-- `build/fedoriri-ubuntu24.04-amd64.iso`
-- `build/fedoriri-ubuntu24.04-amd64.iso.sha256`
+- `build/ubunturiri-ubuntu24.04-amd64.iso`
+- `build/ubunturiri-ubuntu24.04-amd64.iso.sha256`
 
 Le script réextrait la configuration et les fichiers embarqués pour les vérifier et contrôle la présence des entrées BIOS/UEFI. **Ce contrôle ne teste pas le démarrage.** Une sortie existante n’est pas écrasée.
 
@@ -103,11 +103,11 @@ Le contrôle suit les périphériques parents de la racine et exige LUKS ainsi q
 Dans la session utilisateur, sans `sudo` :
 
 ```bash
-fedoriri-theme-set --list
-fedoriri-theme-set tokyo-night
-fedoriri-theme-set --next
-fedoriri-citrix-mode
-fedoriri-citrix-mode --restore
+ubunturiri-theme-set --list
+ubunturiri-theme-set tokyo-night
+ubunturiri-theme-set --next
+ubunturiri-citrix-mode
+ubunturiri-citrix-mode --restore
 ```
 
 Le mode Citrix sauvegarde puis suspend les raccourcis GNOME/Pop Shell sélectionnés. Une seconde activation les restaure ; la restauration est également demandée à l’ouverture de session. Il ne garantit pas la capture de toutes les touches par Citrix et ne suspend pas le verrouillage du poste.

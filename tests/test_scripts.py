@@ -23,14 +23,14 @@ class ConfigurationTests(unittest.TestCase):
     def test_identity_validation(self):
         for user in ["root", "../user", "user;id", "", "A"]:
             with self.assertRaises(ValueError):
-                iso_config.identity(user, "fedoriri", HASH)
+                iso_config.identity(user, "ubunturiri", HASH)
         with self.assertRaises(ValueError):
-            iso_config.identity("fedo", "bad/name", HASH)
+            iso_config.identity("ubunturiri", "bad/name", HASH)
         with self.assertRaises(ValueError):
-            iso_config.identity("fedo", "fedoriri", "not-a-hash")
+            iso_config.identity("ubunturiri", "ubunturiri", "not-a-hash")
 
     def test_autoinstall_security(self):
-        config = iso_config.autoinstall("fedo", "fedoriri", HASH)
+        config = iso_config.autoinstall("ubunturiri", "ubunturiri", HASH)
         data = config["autoinstall"]
         self.assertEqual(data["identity"]["password"], HASH)
         self.assertEqual(data["interactive-sections"], ["network", "storage"])
@@ -132,7 +132,7 @@ class AssemblyTests(unittest.TestCase):
             payload = root / "payload"
             payload.mkdir()
             (payload / "sample").write_text("contenu")
-            config = iso_config.autoinstall("fedo", "fedoriri", HASH)
+            config = iso_config.autoinstall("ubunturiri", "ubunturiri", HASH)
             def execute(args, **kwargs):
                 if "-extract" in args:
                     target = Path(args[-1])
@@ -201,7 +201,7 @@ class SessionTests(unittest.TestCase):
             with patch("theme.THEMES", root / "themes"), patch("theme.Path.home", return_value=root), patch("theme.settings", side_effect=fake) as setter, contextlib.redirect_stdout(io.StringIO()):
                 theme.apply_theme("test")
                 setter.assert_any_call("set", theme.POP_ID, "hint-color-rgba", "'#123456'")
-            self.assertEqual((root / ".local/state/fedoriri/theme").read_text(), "test\n")
+            self.assertEqual((root / ".local/state/ubunturiri/theme").read_text(), "test\n")
 
     def test_user_setup_without_root_or_live_session(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -213,7 +213,7 @@ class SessionTests(unittest.TestCase):
                 setter.assert_any_call("set", session_setup.POP_ID, "tile-by-default", "true")
             config = json.loads((home / ".config/pop-shell/config.json").read_text())
             self.assertIn("wfica", config["float"][0]["class"])
-            self.assertTrue((home / ".local/state/fedoriri/configured").exists())
+            self.assertTrue((home / ".local/state/ubunturiri/configured").exists())
 
 
 if __name__ == "__main__":

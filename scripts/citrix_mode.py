@@ -27,7 +27,7 @@ def snapshot():
     value = settings("get", "org.gnome.mutter", "overlay-key")
     values.append(["org.gnome.mutter", "overlay-key", value, "''"])
     for name in ["terminal", "theme"]:
-        schema = "org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/fedoriri-" + name + "/"
+        schema = "org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/ubunturiri-" + name + "/"
         values.append([schema, "binding", settings("get", schema, "binding"), "''"])
     return values
 
@@ -64,7 +64,7 @@ def main():
     if os.geteuid() == 0:
         raise ValueError("Exécuter dans la session GNOME utilisateur, pas avec sudo.")
     os.umask(0o077)
-    path = Path.home() / ".local/state/fedoriri/citrix-mode.json"
+    path = Path.home() / ".local/state/ubunturiri/citrix-mode.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.with_suffix(".lock").open("w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
