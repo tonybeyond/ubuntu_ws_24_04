@@ -1,0 +1,11 @@
+.cache/
+build/
+__pycache__/
+*.pyc
+*.iso
+*.deb
+.abacusai/
+.DS_Store
+.env
+.env.*
+autoinstall.yaml
