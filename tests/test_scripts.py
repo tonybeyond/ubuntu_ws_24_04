@@ -19,6 +19,23 @@ import theme
 HASH = "$6$simulation$" + "a" * 86
 
 
+class PreflightTests(unittest.TestCase):
+    def test_root_policy_and_cli(self):
+        with patch("build_iso.platform.system", return_value="Linux"), patch("build_iso.platform.freedesktop_os_release", return_value={"ID": "ubuntu", "VERSION_ID": "24.04"}), patch("build_iso.sys.version_info", (3, 12)), patch("build_iso.shutil.which", return_value="/usr/bin/tool"), patch.object(Path, "is_file", return_value=True), patch("build_iso.os.geteuid", return_value=0), patch("build_iso.os.umask"), contextlib.redirect_stdout(io.StringIO()) as output:
+            with self.assertRaisesRegex(ValueError, "--allow-root"):
+                build_iso.main(["--check"])
+            build_iso.main(["--allow-root", "--check"])
+            self.assertIn("construction autorisée en root", output.getvalue())
+            with patch("build_iso.os.geteuid", return_value=1000):
+                build_iso.main(["--check"])
+            with patch("build_iso.platform.freedesktop_os_release", return_value={"ID": "ubuntu", "VERSION_ID": "22.04"}):
+                with self.assertRaises(ValueError):
+                    build_iso.main(["--allow-root", "--check"])
+            with patch("build_iso.shutil.which", return_value=None):
+                with self.assertRaises(ValueError):
+                    build_iso.main(["--allow-root", "--check"])
+
+
 class ConfigurationTests(unittest.TestCase):
     def test_identity_validation(self):
         for user in ["root", "../user", "user;id", "", "A"]:

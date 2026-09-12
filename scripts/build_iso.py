@@ -45,7 +45,7 @@ def run(arguments, **kwargs):
     return subprocess.run([str(value) for value in arguments], check=True, **kwargs)
 
 
-def preflight():
+def preflight(allow_root=False):
     if platform.system() != "Linux" or sys.version_info < (3, 12):
         raise ValueError("Construire dans Ubuntu 24.04 avec Python 3.12 ou ultérieur, pas directement sous macOS.")
     release = platform.freedesktop_os_release()
@@ -56,7 +56,9 @@ def preflight():
     if missing or not KEYRING.is_file():
         raise ValueError("Dépendances requises : sudo apt install python3 xorriso openssl gpgv ubuntu-keyring")
     if os.geteuid() == 0:
-        raise ValueError("Lancer la construction sans sudo ; seuls les prérequis nécessitent sudo.")
+        if not allow_root:
+            raise ValueError("Lancer la construction sans sudo, ou utiliser --allow-root dans un CT dédié.")
+        print("Attention : construction autorisée en root ; utiliser un environnement dédié sans montages sensibles de l’hôte.")
     print("Prérequis de construction vérifiés.")
 
 
@@ -196,6 +198,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Préparer une ISO personnelle Ubuntu Server 24.04 AMD64, GNOME X11, Pop Shell et Citrix.", epilog="Ubuntu 24.04 requis pour construire. Réseau requis pendant l’installation. Dans Subiquity, choisir LVM et activer le chiffrement LUKS : une installation non chiffrée sera refusée avant la configuration du bureau. L’ISO contient le hash utilisateur : ne pas la publier.")
     parser._option_string_actions["--help"].help = "afficher cette aide et quitter"
     parser.add_argument("--check", action="store_true", help="vérifier uniquement les outils de construction")
+    parser.add_argument("--allow-root", action="store_true", help="autoriser explicitement root dans un environnement de construction dédié")
     parser.add_argument("--citrix-deb", type=Path, help="paquet officiel icaclient AMD64 téléchargé depuis Citrix")
     parser.add_argument("--iso", type=Path, help="ISO officielle déjà téléchargée, vérifiée contre le manifeste signé courant")
     parser.add_argument("--username", default="ubunturiri", help="compte créé dans le système installé (défaut : ubunturiri)")
@@ -203,7 +206,7 @@ def main(argv=None):
     parser.add_argument("--output", type=Path, default=ROOT / "build/ubunturiri-ubuntu24.04-amd64.iso", help="ISO de sortie, ne doit pas déjà exister")
     args = parser.parse_args(argv)
     os.umask(0o077)
-    preflight()
+    preflight(allow_root=args.allow_root)
     if args.check:
         return
     if args.citrix_deb is None:

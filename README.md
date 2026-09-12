@@ -24,7 +24,7 @@ L’installation GNOME utilise des paquets sélectionnés avec `--no-install-rec
 
 ## Prérequis
 
-- Une machine ou VM **Ubuntu 24.04**, de préférence AMD64, pour construire. Le script refuse macOS, les autres distributions et l’exécution en root.
+- Une machine ou VM **Ubuntu 24.04**, de préférence AMD64, pour construire. Un CT Ubuntu 24.04 dédié convient aussi pour préparer l’ISO. Le script refuse macOS et les autres distributions ; root est refusé par défaut, sauf avec `--allow-root`.
 - Python **3.12 ou ultérieur** et les outils indiqués ci-dessous.
 - Au moins **15 Gio libres**, seuil minimal contrôlé par le script ; prévoir davantage pour une VM de test.
 - Une connexion Internet pour la construction **et pour l’installation**.
@@ -45,7 +45,23 @@ bash build-iso.sh --check
 bash build-iso.sh --citrix-deb "/chemin/vers/icaclient_amd64.deb"
 ```
 
-Remplacer le chemin du DEB par celui du fichier officiel téléchargé. Ne pas lancer `build-iso.sh` avec `sudo`.
+Remplacer le chemin du DEB par celui du fichier officiel téléchargé. Sur un poste classique, lancer `build-iso.sh` sans `sudo`.
+
+### Construction en root dans un CT dédié
+
+Depuis le dépôt déjà cloné, avec les dépendances installées :
+
+```bash
+git pull --ff-only
+bash build-iso.sh --allow-root --check
+bash build-iso.sh --allow-root --citrix-deb "/chemin/vers/icaclient_amd64.deb"
+```
+
+`--allow-root` autorise uniquement l’utilisateur root : les contrôles Ubuntu 24.04, Python et dépendances restent actifs. L’option ne détecte pas automatiquement un conteneur et ne l’isole pas davantage ; réserver son utilisation à un environnement dédié, sans montage de dossiers sensibles de l’hôte. Le compte créé dans le système installé reste `ubunturiri`, sauf option `--username`.
+
+Le CT sert à préparer l’ISO. Le démarrage, l’installation chiffrée et le bureau doivent être validés dans une VM ou sur une machine de test.
+
+### Déroulement de la construction
 
 Le script télécharge les sources épinglées et l’ISO Ubuntu courante de la série 24.04, vérifie la signature du manifeste Ubuntu et son SHA-256, puis demande deux fois le mot de passe utilisateur dans le terminal, sans l’afficher. Le mot de passe doit comporter au moins 12 caractères.
 
