@@ -614,6 +614,49 @@ class ShellSetupTests(unittest.TestCase):
                     shell_setup.configure_user()
 
 
+class InstallerDiagnosticsTests(unittest.TestCase):
+
+    def setUp(self):
+        self.path = build_iso.ROOT / "scripts/install-desktop.sh"
+        self.text = self.path.read_text()
+
+    def test_syntax_is_valid_bash(self):
+        subprocess.run(["bash", "-n", str(self.path)], check=True)
+
+    def test_logging_is_armed_before_the_first_step(self):
+        self.assertIn('exec > >(tee -a "$LOG") 2>&1', self.text)
+        self.assertIn("""trap 'on_error "$LINENO" "$BASH_COMMAND"' ERR""", self.text)
+        self.assertLess(self.text.index("trap 'on_error"), self.text.index("apt-get update"))
+
+    def test_logging_failure_does_not_abort_the_install(self):
+        # Une redirection exec qui échoue tuerait le script avant la première
+        # étape : le chemin doit être testé avant d'être utilisé.
+        guard = self.text.index(': >> "$LOG" 2>/dev/null')
+        self.assertLess(guard, self.text.index('exec > >(tee -a "$LOG")'))
+        self.assertIn("LOG='(indisponible)'", self.text)
+
+    def test_font_check_does_not_depend_on_the_fontconfig_cache(self):
+        # « fc-list | grep » échouait dans le chroot alors que les polices
+        # étaient installées, et arrêtait toute l'installation après Starship.
+        code = "\n".join(line for line in self.text.splitlines() if not line.lstrip().startswith("#"))
+        self.assertNotIn("fc-list", code)
+        self.assertIn("fc-scan --format '%{family}\\n'", code)
+        self.assertIn("JetBrainsMonoNerdFontMono-Regular.ttf", self.text)
+
+    def test_fc_cache_failure_is_only_a_warning(self):
+        block = self.text[self.text.index("fc-cache"):]
+        self.assertTrue(block.startswith("fc-cache -f \"$FONT_DIR\" >/dev/null 2>&1; then")
+                        or "if ! fc-cache" in self.text)
+        self.assertIn("Avertissement : fc-cache a échoué", self.text)
+        # Aucun exit entre le fc-cache et l'étape suivante.
+        entre = self.text[self.text.index("if ! fc-cache"):self.text.index("step 'Navigateur Brave Origin'")]
+        self.assertNotIn("exit 1", entre)
+
+    def test_every_step_is_announced_through_the_logged_helper(self):
+        self.assertGreaterEqual(self.text.count("\nstep '"), 9)
+        self.assertIn("=== ubunturiri : %s ===", self.text)
+
+
 class BashrcTests(unittest.TestCase):
 
     def setUp(self):

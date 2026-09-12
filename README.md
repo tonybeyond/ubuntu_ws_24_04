@@ -188,6 +188,29 @@ sudo netbird up --setup-key <CLÉ>
 netbird status --detail
 ```
 
+### Diagnostic d'une installation qui échoue
+
+`install-desktop.sh` annonce chaque étape et duplique toute sa sortie dans `/var/log/ubunturiri-install.log`, **à l'intérieur de la cible**. Un `trap ERR` nomme la ligne, la commande et le code de retour. Sans cela, Subiquity n'affiche qu'un rapport de plantage et la sortie réelle part dans le journal du système *live*, sous un identifiant `subiquity_log.<pid>`.
+
+Depuis l'installateur, pendant que la cible est encore montée :
+
+```bash
+sudo tail -n 60 /target/var/log/ubunturiri-install.log
+```
+
+Après redémarrage, le même fichier est en `/var/log/ubunturiri-install.log`. Les recours d'origine restent valables :
+
+```bash
+sudo journalctl -t subiquity_log.<pid> --no-pager -o cat | tail -60
+sudo tail -n 80 /var/log/installer/curtin-install.log
+```
+
+Si l'installation s'arrête en cours de route, GNOME peut quand même démarrer : le paquet `gdm3` s'active de lui-même. Ce n'est pas le signe d'une installation réussie — la configuration de session, Pop Shell, les raccourcis et le shell sont posés par les toutes dernières étapes du script.
+
+#### Polices : ne pas contrôler via le cache fontconfig
+
+Le contrôle `fc-list | grep` échouait dans le chroot de l'installateur alors que les polices étaient correctement extraites, et arrêtait l'installation juste après Starship. La vérification lit désormais la famille directement dans le fichier avec `fc-scan`, sans dépendre du cache ni de la configuration de fontconfig, et `fc-cache` n'est plus bloquant : fontconfig indexe le répertoire à l'ouverture de session.
+
 ### Shell
 
 `scripts/files/bashrc` est le portage bash du `.zshrc` macOS : mêmes alias de navigation, de git, de `ls` vers `eza`, mêmes options fzf, même bascule `EDITOR` selon `SSH_CONNECTION`. Les équivalences :
@@ -247,7 +270,7 @@ bash -n build-iso.sh scripts/install-desktop.sh
 python3 -m py_compile scripts/*.py tests/*.py
 ```
 
-Les contrôles locaux comprennent **53 tests unitaires réussis**, la syntaxe Bash/Python, la vérification des clés Pop Shell sur les sources épinglées, le rendu de **22 palettes avec appels GNOME simulés** et la présence de **71 noms de paquets** dans les index Noble AMD64. Ces résultats ne prouvent ni la résolution APT complète ni le bon fonctionnement graphique.
+Les contrôles locaux comprennent **59 tests unitaires réussis**, la syntaxe Bash/Python, la vérification des clés Pop Shell sur les sources épinglées, le rendu de **22 palettes avec appels GNOME simulés** et la présence de **71 noms de paquets** dans les index Noble AMD64. Ces résultats ne prouvent ni la résolution APT complète ni le bon fonctionnement graphique.
 
 Contrôles supplémentaires effectués sur les composants ajoutés, hors ISO : téléchargement réel des 9 composants épinglés et correspondance de leurs SHA-256, préparation complète du contenu embarqué avec `verify_payload` (122 fichiers, 72,6 Mio), rejeu des commandes d'extraction `tar` de `install-desktop.sh`, validation de `starship.toml` par le binaire Starship 1.25.1 sans avertissement, contrôle de chaque clé de la configuration Ghostty contre `ghostty(5)` livré dans le paquet, et chargement du bashrc dans un bash interactif réel avec `ble.sh` rattaché. **L'installation dans une cible Ubuntu 24.04 reste à valider.**
 
