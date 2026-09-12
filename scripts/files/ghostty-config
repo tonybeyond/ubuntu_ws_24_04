@@ -1,0 +1,20 @@
+# Configuration Ghostty installée dans ~/.config/ghostty/config.
+# ssh-env et ssh-terminfo corrigent le TERM=xterm-ghostty qui casse nano
+# et les retours chariot sur les hôtes distants sans cette entrée terminfo.
+
+# Nom exact du thème fourni dans /usr/share/ghostty/themes, sensible à la casse.
+theme = TokyoNight Night
+
+font-family = JetBrainsMono Nerd Font Mono
+font-size = 11
+
+shell-integration = bash
+shell-integration-features = cursor,sudo,title,ssh-env,ssh-terminfo
+
+window-padding-x = 8
+window-padding-y = 6
+window-decoration = auto
+
+copy-on-select = clipboard
+confirm-close-surface = true
+scrollback-limit = 10000

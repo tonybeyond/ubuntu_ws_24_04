@@ -62,7 +62,7 @@ def configure_user():
     home = Path.home()
     values = {
         "org.gnome.desktop.input-sources": {"sources": "[('xkb', 'ch+fr')]"},
-        "org.gnome.desktop.interface": {"color-scheme": "'prefer-dark'", "monospace-font-name": "'Fira Code 11'"},
+        "org.gnome.desktop.interface": {"color-scheme": "'prefer-dark'", "monospace-font-name": "'JetBrainsMono Nerd Font Mono 11'"},
         "org.gnome.desktop.session": {"idle-delay": "uint32 600"},
         "org.gnome.desktop.screensaver": {"lock-enabled": "true"},
         "org.gnome.mutter": {"workspaces-only-on-primary": "false"},
@@ -86,7 +86,10 @@ def configure_user():
     media = "org.gnome.settings-daemon.plugins.media-keys"
     raw = settings("get", media, "custom-keybindings")
     paths = [] if raw.startswith("@as") else ast.literal_eval(raw)
-    shortcuts = [("terminal", "Terminal", "gnome-terminal", "<Super>Return"), ("citrix", "Mode clavier Citrix", "ubunturiri-citrix-mode", "<Super>Escape"), ("theme", "Thème suivant", "ubunturiri-theme-set --next", "<Super><Shift>y")]
+    # Ghostty devient le terminal de Super+Entrée ; gnome-terminal reste
+    # installé comme repli si Ghostty ne démarre pas.
+    terminal = "ghostty" if Path("/usr/bin/ghostty").is_file() else "gnome-terminal"
+    shortcuts = [("terminal", "Terminal", terminal, "<Super>Return"), ("citrix", "Mode clavier Citrix", "ubunturiri-citrix-mode", "<Super>Escape"), ("theme", "Thème suivant", "ubunturiri-theme-set --next", "<Super><Shift>y")]
     for name, label, command, binding in shortcuts:
         path = f"/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/ubunturiri-{name}/"
         if path not in paths:

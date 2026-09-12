@@ -4,6 +4,8 @@ Scripts de préparation d’une ISO personnelle Ubuntu Server 24.04 LTS AMD64 av
 
 Le projet conserve une base serveur minimale, le pavage des fenêtres, les palettes adaptées et un profil de raccourcis pour Citrix. Il repose sur Ubuntu et GNOME Xorg. Shadow.tech n’est pas intégré.
 
+S’y ajoute une couche applicative : Ghostty, Neovim, LibreOffice francisé, NetBird, Brave Origin, et un shell bash monté comme l’environnement zsh de référence sous macOS — Starship, ble.sh, eza, zoxide, fzf. Voir [Applications et shell](#applications-et-shell).
+
 > **État : scripts testés localement, installation complète non validée.** Les tests unitaires ne remplacent pas une construction d’ISO, un démarrage en VM ni une connexion Citrix réelle. Ne pas utiliser sur un disque contenant des données sans sauvegarde.
 
 ## Configuration
@@ -18,6 +20,8 @@ Le projet conserve une base serveur minimale, le pavage des fenêtres, les palet
 | Compte par défaut | `ubunturiri`, nom de machine `ubunturiri`, personnalisables |
 | Apparence | Tokyo Night par défaut ; palettes adaptées au fond, au terminal et à Pop Shell |
 | Audio et réseau | PipeWire, WirePlumber, NetworkManager, Bluetooth |
+| Applications | Ghostty, Neovim, LibreOffice, NetBird, Brave Origin, Starship, ble.sh |
+| Shell | bash avec Starship, ble.sh, eza, zoxide, fzf, fastfetch, aria2 |
 | Sécurité | Racine LUKS exigée, connexion automatique désactivée, pas de serveur SSH installé par ce profil |
 
 L’installation GNOME utilise des paquets sélectionnés avec `--no-install-recommends`, et non le métapaquet Ubuntu Desktop complet. Des outils de compilation restent installés pour Pop Shell. Il ne s’agit pas d’une adaptation du projet original, ni d’une ISO live de bureau préconfiguré.
@@ -112,7 +116,7 @@ Le contrôle suit les périphériques parents de la racine et exige LUKS ainsi q
 
 | Raccourci | Action prévue |
 | --- | --- |
-| `Super + Entrée` | Ouvrir le terminal |
+| `Super + Entrée` | Ouvrir Ghostty, ou `gnome-terminal` en repli s’il est absent |
 | `Super + Espace` | Vue d’ensemble GNOME |
 | `Super + R` | Mode de manipulation des fenêtres Pop Shell |
 | `Super + Y` | Activer ou désactiver le pavage Pop Shell |
@@ -134,13 +138,86 @@ Le mode Citrix sauvegarde puis suspend les raccourcis GNOME/Pop Shell sélection
 
 Les palettes ne remplacent pas intégralement le thème GNOME Shell ni l’apparence des applications libadwaita. Aucun lanceur Pop Launcher séparé n’est installé : la vue d’ensemble GNOME sert de lanceur.
 
+La police monospace de GNOME est réglée sur `JetBrainsMono Nerd Font Mono 11` ; les palettes `ubunturiri-theme-set` ne modifient pas la configuration Ghostty, qui a son propre thème dans `~/.config/ghostty/config`.
+
+## Applications et shell
+
+### Ce qui vient des dépôts Ubuntu
+
+LibreOffice 24.2 (Writer, Calc, Impress, Draw, intégration GTK3), sa localisation française, `hunspell-fr`, `mythes-fr` et `hyphen-fr`, plus `eza`, `zoxide`, `fzf`, `ripgrep`, `fd-find`, `bat`, `jq`, `tmux` et `aria2`. Tous suivis par la sécurité Ubuntu, tous installés avec `--no-install-recommends`. Les noms sont déclarés dans `scripts/packages.py` et contrôlés contre les index Noble AMD64 par `tests/check_sources.py`.
+
+Deux noms diffèrent de macOS : Ubuntu livre `bat` sous le binaire `batcat` et `fd-find` sous `fdfind`. Le bashrc fourni pose les alias correspondants.
+
+### Composants épinglés, absents des dépôts Ubuntu
+
+| Composant | Version | Raison |
+| --- | --- | --- |
+| Ghostty | 1.3.1~ppa2-noble1 | absent d'Ubuntu ; DEB du PPA `mkasberg/ghostty-ubuntu`, série noble |
+| NetBird et NetBird UI | 0.78.1 | absent d'Ubuntu ; DEB de `pkgs.netbird.io` |
+| Neovim | 0.12.5 | noble ne fournit que 0.9.5, sous le minimum de lazy.nvim et LazyVim |
+| Starship | 1.25.1 | absent de tous les dépôts Ubuntu 24.04 |
+| ble.sh | 0.4.0-devel3 | équivalent bash de zsh-autosuggestions et zsh-syntax-highlighting |
+| fastfetch | 2.64.2 | absent de noble ; `neofetch` y est présent mais n'est plus maintenu |
+| JetBrainsMono Nerd Font | 3.5.1 | `fonts-jetbrains-mono` de noble n'a pas les glyphes exigés par Starship |
+
+Chacun est téléchargé **à la construction**, vérifié contre le SHA-256 déclaré dans `scripts/packages.py`, puis embarqué dans l'ISO et couvert par le manifeste existant. Aucun dépôt tiers n'est ajouté au système installé pour ces composants. En contrepartie ils ne reçoivent **pas de mise à jour automatique** : il faut relever les versions dans `packages.py` et reconstruire.
+
+Ces empreintes sont une confiance à la première utilisation : elles figent ce qui a été téléchargé le jour du relevé, elles ne valident pas une signature amont, contrairement à l'ISO Ubuntu vérifiée par `gpgv`. Pour ghostty et NetBird, l'empreinte épinglée est identique au champ `SHA256` de l'index `Packages` publié par chaque dépôt.
+
+Pour changer de version :
+
+```bash
+# modifier url et version dans scripts/packages.py, puis
+python3 scripts/refresh_pins.py          # signale les écarts sans rien modifier
+python3 scripts/refresh_pins.py --write  # réécrit les champs sha256
+git diff scripts/packages.py
+```
+
+### Brave Origin : le seul dépôt tiers ajouté
+
+Le paquet `brave-origin` dépend de `brave-keyring`, qui installe lui-même la clé du dépôt Brave : le dépôt finit configuré de toute façon, et un navigateur sans mise à jour automatique est un risque plus grand que l'ancre de confiance ajoutée. Le profil pose donc la clé depuis le contenu embarqué, écrit `/etc/apt/sources.list.d/brave-browser.sources` au format deb822 avec `Signed-By`, puis installe `brave-origin` depuis `https://brave-browser-apt-release.s3.brave.com`. La clé embarquée est octet pour octet celle du paquet `brave-keyring`.
+
+Le binaire s'appelle `brave-origin-stable` ; le lanceur est `brave-origin.desktop`.
+
+### NetBird
+
+Le service `netbird.service` est activé mais **le poste n'est enrôlé dans aucun réseau** : aucune clé n'est embarquée dans l'ISO. Après le premier démarrage :
+
+```bash
+sudo netbird up --setup-key <CLÉ>
+netbird status --detail
+```
+
+### Shell
+
+`scripts/files/bashrc` est le portage bash du `.zshrc` macOS : mêmes alias de navigation, de git, de `ls` vers `eza`, mêmes options fzf, même bascule `EDITOR` selon `SSH_CONNECTION`. Les équivalences :
+
+| macOS, zsh | Ubuntu, bash |
+| --- | --- |
+| oh-my-zsh, plugin `z` | `zoxide` |
+| `zsh-autosuggestions`, `zsh-syntax-highlighting` | `ble.sh` |
+| `ENABLE_CORRECTION` | `shopt -s autocd cdspell dirspell` |
+| alias `brew` (`bud`, `bug`, `bcu`) | `upcheck`, `upall`, `cleanup` sur APT |
+| `flushdns` via `dscacheutil` | `resolvectl flush-caches` |
+| `free` via `top -l 1` | `free -h` natif |
+
+`ble.sh` doit être chargé en premier avec `--noattach` et rattaché par `ble-attach` en toute dernière instruction ; Starship s'initialise entre les deux. Lorsque bash est lancé avec `-c`, `ble.sh` renvoie 1 sans message : le bashrc teste donc le code de retour avant d'appeler `bleopt` et `ble-face`, sans quoi chaque shell non interactif affiche deux `command not found`.
+
+Les ajouts personnels vont dans `~/.bashrc.local`, chargé en fin de fichier et préservé si le profil est réappliqué. Le `.bashrc` d'origine d'Ubuntu est sauvegardé en `~/.bashrc.ubuntu-origine`.
+
+Le locale reste `fr_CH.UTF-8` ; le `export LC_ALL=en_US.UTF-8` du `.zshrc` macOS n'est pas repris, `en_US.UTF-8` n'étant pas générée par ce profil.
+
+### Ghostty et terminfo sur les hôtes distants
+
+`TERM=xterm-ghostty` n'existe pas dans la base terminfo des serveurs, ce qui casse `nano` et les retours chariot en SSH. La configuration fournie active `shell-integration-features = ssh-env,ssh-terminfo` : Ghostty bascule sur `xterm-256color` et tente d'installer son entrée terminfo sur l'hôte distant via `infocmp` et `tic`. Option disponible depuis Ghostty 1.2.0, documentée dans `ghostty(5)` livré avec le paquet.
+
 ## Citrix : installation et limites
 
 Le script vérifie le nom `icaclient` et l’architecture `amd64` du DEB, puis laisse APT résoudre ses dépendances dans Ubuntu 24.04. Ce contrôle n’authentifie pas le fournisseur du DEB : utiliser uniquement le téléchargement officiel. Aucun dépôt d’une autre version Ubuntu ni faux lien de bibliothèque n’est ajouté.
 
 La présence du binaire `wfica` et ses dépendances dynamiques sont contrôlées. Les règles Pop Shell tentent de laisser flotter les fenêtres Citrix connues. Le fonctionnement du portail de connexion, des certificats d’entreprise, du multimoniteur, du son, du microphone, des périphériques USB, de Teams et du partage d’écran nécessite des essais dans l’environnement Citrix concerné.
 
-Le paquet Citrix est embarqué dans l’ISO privée, mais **n’est pas fourni dans ce dépôt**. Sa redistribution reste soumise aux conditions de Citrix. Aucun navigateur web n’est explicitement ajouté par le profil : prévoir celui requis par le mode d’accès de l’entreprise.
+Le paquet Citrix est embarqué dans l’ISO privée, mais **n’est pas fourni dans ce dépôt**. Sa redistribution reste soumise aux conditions de Citrix. Le profil installe Brave Origin comme navigateur ; si le mode d’accès de l’entreprise exige un navigateur précis, l’ajouter séparément.
 
 ## Structure du dépôt
 
@@ -148,6 +225,10 @@ Le paquet Citrix est embarqué dans l’ISO privée, mais **n’est pas fourni d
 | --- | --- |
 | `build-iso.sh` | Point d’entrée de construction |
 | `scripts/build_iso.py` | Téléchargements, vérifications, saisie du mot de passe, assemblage de l’ISO |
+| `scripts/packages.py` | Listes de paquets APT, composants épinglés par URL et SHA-256, dépôt Brave |
+| `scripts/refresh_pins.py` | Recalcul des empreintes après un changement de version |
+| `scripts/shell_setup.py` | Pose du bashrc, de starship.toml et de la configuration Ghostty |
+| `scripts/files/` | bashrc, starship.toml et configuration Ghostty embarqués tels quels |
 | `scripts/iso_config.py` | Configuration Subiquity, modification GRUB, contrôles du contenu et de LUKS |
 | `scripts/install-desktop.sh` | Installation dans la cible ; ne pas exécuter directement sur le poste de travail |
 | `scripts/session_setup.py` | Configuration GDM, GNOME, raccourcis et compte utilisateur |
@@ -166,7 +247,9 @@ bash -n build-iso.sh scripts/install-desktop.sh
 python3 -m py_compile scripts/*.py tests/*.py
 ```
 
-Les contrôles locaux effectués lors de la préparation initiale comprennent **36 tests unitaires réussis**, la syntaxe Bash/Python, la vérification des clés Pop Shell sur les sources épinglées, le rendu de **22 palettes avec appels GNOME simulés** et la présence de **49 noms de paquets** dans les index Noble AMD64. Ces résultats ne prouvent ni la résolution APT complète ni le bon fonctionnement graphique.
+Les contrôles locaux comprennent **53 tests unitaires réussis**, la syntaxe Bash/Python, la vérification des clés Pop Shell sur les sources épinglées, le rendu de **22 palettes avec appels GNOME simulés** et la présence de **71 noms de paquets** dans les index Noble AMD64. Ces résultats ne prouvent ni la résolution APT complète ni le bon fonctionnement graphique.
+
+Contrôles supplémentaires effectués sur les composants ajoutés, hors ISO : téléchargement réel des 9 composants épinglés et correspondance de leurs SHA-256, préparation complète du contenu embarqué avec `verify_payload` (122 fichiers, 72,6 Mio), rejeu des commandes d'extraction `tar` de `install-desktop.sh`, validation de `starship.toml` par le binaire Starship 1.25.1 sans avertissement, contrôle de chaque clé de la configuration Ghostty contre `ghostty(5)` livré dans le paquet, et chargement du bashrc dans un bash interactif réel avec `ble.sh` rattaché. **L'installation dans une cible Ubuntu 24.04 reste à valider.**
 
 Le contrôle complémentaire `python3 tests/check_sources.py DOSSIER` attend dans ce dossier les archives `pop-shell.tar.gz` et `fedoriri.tar.gz` correspondant aux commits ci-dessous, ainsi que `main.xz` et `universe.xz`, index `Packages.xz` Noble AMD64 des composants correspondants. Il ne les télécharge pas.
 
@@ -177,6 +260,10 @@ Avant toute utilisation quotidienne, restent à valider :
 - Déverrouillage LUKS et connexion avec le compte prévu après retrait du média.
 - Session réellement X11, Pop Shell chargé, réseau et audio opérationnels.
 - Parcours Citrix réel et fonctions nécessaires au poste.
+- Résolution APT réelle des paquets ajoutés, notamment `brave-origin` dont la dépendance `libasound2` est satisfaite dans noble par le `Provides` versionné de `libasound2t64`.
+- Rendu des glyphes Nerd Font dans Ghostty et GNOME Terminal, prompt Starship complet, autosuggestions ble.sh sur le matériel réel.
+- Enrôlement NetBird et accès au réseau superposé.
+- Chaîne `ssh-terminfo` de Ghostty contre un hôte distant sans entrée `xterm-ghostty`.
 
 ## Sources et maintenance
 

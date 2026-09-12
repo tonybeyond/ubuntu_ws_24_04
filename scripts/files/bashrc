@@ -1,0 +1,187 @@
+# Portage bash du .zshrc macOS : Starship, ble.sh, eza, zoxide, fzf.
+# Installé par shell_setup.py dans /etc/skel et dans le compte utilisateur.
+# Fichier remplacé à chaque installation : mettre les ajouts personnels
+# dans ~/.bashrc.local, chargé en fin de fichier.
+
+case $- in
+  *i*) ;;
+  *) return ;;
+esac
+
+# ─── ble.sh — autosuggestions et coloration de syntaxe ────────────────────────
+# Remplace zsh-autosuggestions et zsh-syntax-highlighting.
+# Doit être chargé en premier, détaché, puis rattaché en fin de fichier.
+
+# ble.sh renvoie 1 sans message quand bash a été lancé avec -c : ne configurer
+# que si le chargement a réussi, sinon chaque shell affiche command not found.
+
+if [[ -f /usr/share/blesh/ble.sh ]] && source /usr/share/blesh/ble.sh --noattach; then
+  bleopt complete_auto_history=1
+  # Gris identique à ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE sur macOS.
+  ble-face auto_complete='fg=#888888'
+fi
+
+# ─── Historique ──────────────────────────────────────────────────────────────
+
+HISTSIZE=50000
+HISTFILESIZE=100000
+HISTCONTROL=ignoreboth:erasedups
+HISTIGNORE='ls:ll:la:cd:pwd:exit:clear:history'
+HISTTIMEFORMAT='%F %T '
+shopt -s histappend
+shopt -s cmdhist
+
+# ─── Options du shell ────────────────────────────────────────────────────────
+# autocd et cdspell couvrent ENABLE_CORRECTION et le plugin z de oh-my-zsh.
+
+shopt -s autocd
+shopt -s cdspell
+shopt -s dirspell
+shopt -s checkwinsize
+shopt -s globstar
+shopt -s nocaseglob
+
+# ─── Complétion ──────────────────────────────────────────────────────────────
+
+if [[ -f /usr/share/bash-completion/bash_completion ]]; then
+  source /usr/share/bash-completion/bash_completion
+fi
+
+# ─── Éditeur ─────────────────────────────────────────────────────────────────
+
+if [[ -n ${SSH_CONNECTION:-} ]]; then
+  export EDITOR='nvim'
+else
+  export EDITOR='nano'
+fi
+export VISUAL="$EDITOR"
+
+# ─── PATH ────────────────────────────────────────────────────────────────────
+
+export PATH="$HOME/bin:$HOME/.local/bin:/usr/local/bin:$PATH"
+
+# ─── Navigation ──────────────────────────────────────────────────────────────
+
+alias ..='cd ..'
+alias ...='cd ../..'
+alias .3='cd ../../..'
+alias .4='cd ../../../..'
+alias .5='cd ../../../../..'
+
+# ─── Éditeurs ────────────────────────────────────────────────────────────────
+
+alias vim='nvim'
+alias vi='nvim'
+
+# ─── ls → eza ────────────────────────────────────────────────────────────────
+
+alias ls='eza -al --color=always --group-directories-first --icons'
+alias la='eza -a --color=always --group-directories-first --icons'
+alias ll='eza -l --color=always --group-directories-first --icons'
+alias lt='eza -aT --color=always --group-directories-first --icons'
+alias l.='eza -a | grep -E "^\."'
+
+# ─── Noms Debian des binaires Rust ───────────────────────────────────────────
+# Ubuntu livre bat sous le nom batcat et fd-find sous le nom fdfind.
+
+alias bat='batcat'
+alias fd='fdfind'
+
+# ─── grep colorisé ───────────────────────────────────────────────────────────
+
+alias grep='grep --color=auto'
+alias egrep='grep -E --color=auto'
+alias fgrep='grep -F --color=auto'
+
+# ─── Sécurité ────────────────────────────────────────────────────────────────
+
+alias cp='cp -iv'
+alias mv='mv -iv'
+alias rm='rm -iv'
+alias df='df -h'
+alias du='du -h'
+
+# ─── APT — équivalents des alias Homebrew ────────────────────────────────────
+
+alias upcheck='sudo apt-get update && apt list --upgradable'
+alias upall='sudo apt-get update && sudo apt-get upgrade'
+alias cleanup='sudo apt-get autoremove --purge && sudo apt-get clean'
+alias aptin='sudo apt-get install --no-install-recommends'
+alias aptse='apt-cache search'
+
+# ─── Git ─────────────────────────────────────────────────────────────────────
+
+alias g='git'
+alias gs='git status'
+alias ga='git add'
+alias addup='git add -u'
+alias addall='git add .'
+alias branch='git branch'
+alias checkout='git checkout'
+alias clone='git clone'
+alias commit='git commit -m'
+alias fetch='git fetch'
+alias pull='git pull origin'
+alias push='git push origin'
+alias tag='git tag'
+alias newtag='git tag -a'
+alias gl='git log --oneline --graph --decorate'
+
+# ─── Téléchargement ──────────────────────────────────────────────────────────
+
+alias aria='aria2c -x 8 -s 8 -k 1M --continue=true'
+
+# ─── Réseau ──────────────────────────────────────────────────────────────────
+# Équivalent systemd de flushdns sur macOS.
+
+alias flushdns='sudo resolvectl flush-caches && resolvectl statistics'
+alias ports='ss -tulpn'
+alias nb='netbird status --detail'
+
+# ─── fzf ─────────────────────────────────────────────────────────────────────
+
+export FZF_DEFAULT_OPTS='--height 40% --layout=reverse --border --info=inline'
+if command -v fdfind >/dev/null 2>&1; then
+  export FZF_DEFAULT_COMMAND='fdfind --type f --hidden --follow --exclude .git'
+  export FZF_CTRL_T_COMMAND="$FZF_DEFAULT_COMMAND"
+fi
+for candidate in /usr/share/doc/fzf/examples/key-bindings.bash /usr/share/bash-completion/completions/fzf; do
+  if [[ -f $candidate ]]; then
+    source "$candidate"
+  fi
+done
+unset candidate
+
+# ─── zoxide — remplace le plugin z ───────────────────────────────────────────
+
+if command -v zoxide >/dev/null 2>&1; then
+  eval "$(zoxide init bash)"
+fi
+
+# ─── Ajouts personnels ───────────────────────────────────────────────────────
+
+if [[ -f ~/.bashrc.local ]]; then
+  source ~/.bashrc.local
+fi
+
+# ─── Prompt — Starship ───────────────────────────────────────────────────────
+# Chargé après les alias et avant ble-attach, comme eval starship init zsh
+# venait après oh-my-zsh sur macOS.
+
+if command -v starship >/dev/null 2>&1; then
+  eval "$(starship init bash)"
+fi
+
+# ─── Démarrage ───────────────────────────────────────────────────────────────
+
+if command -v fastfetch >/dev/null 2>&1 && [[ -z ${FASTFETCH_SHOWN:-} ]]; then
+  export FASTFETCH_SHOWN=1
+  fastfetch
+fi
+
+# ─── Rattachement de ble.sh ──────────────────────────────────────────────────
+# Obligatoirement la dernière instruction du fichier.
+
+if [[ ${BLE_VERSION-} ]]; then
+  ble-attach
+fi

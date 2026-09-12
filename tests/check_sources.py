@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import build_iso
+import packages as packages_module
 import session_setup
 import theme
 
@@ -59,9 +60,15 @@ def main():
     script = (build_iso.ROOT / "scripts/install-desktop.sh").read_text()
     block = script.split("apt-get install --no-install-recommends -y \\\n", 1)[1].split("\napt-get install", 1)[0]
     names = shlex.split(block.replace("\\\n", " "))
+    grouped = [name for group in packages_module.APT_GROUPS.values() for name in group]
+    names += grouped
     missing = sorted(set(names) - packages)
     assert not missing, f"Paquets absents de Noble AMD64 : {missing}"
-    print(f"Noms de paquets présents dans les index Noble AMD64 : {len(names)}. Résolution APT et installation non testées.")
+    print(f"Noms de paquets présents dans les index Noble AMD64 : {len(names)}, dont {len(grouped)} issus de packages.py. Résolution APT et installation non testées.")
+    for name, pin in packages_module.PINS.items():
+        assert re.fullmatch(r"[0-9a-f]{64}", pin["sha256"]), f"Empreinte invalide pour {name}"
+        assert pin["url"].startswith("https://"), f"URL non HTTPS pour {name}"
+    print(f"Composants épinglés déclarés avec URL HTTPS et SHA-256 : {len(packages_module.PINS)}. Téléchargement non testé ici ; voir scripts/refresh_pins.py.")
 
 
 if __name__ == "__main__":

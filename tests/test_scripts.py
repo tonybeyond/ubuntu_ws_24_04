@@ -16,7 +16,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import build_iso
 import citrix_mode
 import iso_config
+import packages
 import session_setup
+import shell_setup
 import theme
 
 HASH = "$6$simulation$" + "a" * 86
@@ -482,6 +484,166 @@ class DownloadTests(unittest.TestCase):
                 self.assertEqual(iso_path.read_bytes(), iso_content)
                 mock_run.assert_called_once()
                 mock_download.assert_called()
+
+
+class PinTests(unittest.TestCase):
+
+    def test_every_pin_is_https_with_sha256(self):
+        for name, pin in packages.PINS.items():
+            self.assertTrue(pin["url"].startswith("https://"), name)
+            self.assertRegex(pin["sha256"], r"^[0-9a-f]{64}$", name)
+            self.assertTrue(name.startswith("extras/"), name)
+            self.assertNotIn("..", name)
+
+    def test_fetch_pins_rejects_wrong_digest(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            cache = root / "cache"
+            cache.mkdir()
+            payload = root / "payload"
+            payload.mkdir()
+            fake = {"extras/thing.bin": {"version": "1", "url": "https://example.invalid/thing.bin", "sha256": "0" * 64}}
+
+            def fake_download(url, path, resume=True):
+                path.write_bytes(b"contenu inattendu")
+
+            with patch("build_iso.PINS", fake), patch("build_iso.download", side_effect=fake_download):
+                with self.assertRaisesRegex(ValueError, "SHA-256 inattendu"):
+                    build_iso.fetch_pins(payload, cache)
+
+    def test_fetch_pins_copies_and_reuses_cache(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            cache = root / "cache"
+            cache.mkdir()
+            payload = root / "payload"
+            payload.mkdir()
+            body = b"charge utile"
+            digest = hashlib.sha256(body).hexdigest()
+            fake = {"extras/thing.bin": {"version": "1.0", "url": "https://example.invalid/thing.bin", "sha256": digest}}
+            calls = []
+
+            def fake_download(url, path, resume=True):
+                calls.append(url)
+                path.write_bytes(body)
+
+            with patch("build_iso.PINS", fake), patch("build_iso.download", side_effect=fake_download), contextlib.redirect_stdout(io.StringIO()):
+                build_iso.fetch_pins(payload, cache)
+                self.assertEqual((payload / "extras/thing.bin").read_bytes(), body)
+                build_iso.fetch_pins(payload, cache)
+            self.assertEqual(len(calls), 1)
+
+    def test_fetch_pins_discards_corrupted_cache(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            cache = root / "cache"
+            cache.mkdir()
+            payload = root / "payload"
+            payload.mkdir()
+            body = b"charge utile"
+            digest = hashlib.sha256(body).hexdigest()
+            fake = {"extras/thing.bin": {"version": "1.0", "url": "https://example.invalid/thing.bin", "sha256": digest}}
+            (cache / "1.0-thing.bin").write_bytes(b"cache corrompu")
+
+            with patch("build_iso.PINS", fake), patch("build_iso.download", side_effect=lambda url, path, resume=True: path.write_bytes(body)), contextlib.redirect_stdout(io.StringIO()):
+                build_iso.fetch_pins(payload, cache)
+            self.assertEqual((payload / "extras/thing.bin").read_bytes(), body)
+
+
+class PackageListTests(unittest.TestCase):
+
+    def test_apt_groups_are_plain_names(self):
+        for group, names in packages.APT_GROUPS.items():
+            self.assertTrue(names, group)
+            for name in names:
+                self.assertRegex(name, r"^[a-z0-9][a-z0-9+.-]*$", f"{group} : {name}")
+
+    def test_unknown_group_rejected(self):
+        with self.assertRaises(ValueError):
+            packages.apt_list("inexistant")
+
+    def test_brave_source_is_deb822_with_keyring(self):
+        self.assertIn("Signed-By: /usr/share/keyrings/brave-browser-archive-keyring.gpg", packages.BRAVE_SOURCE)
+        self.assertIn("Types: deb\n", packages.BRAVE_SOURCE)
+        self.assertNotIn("[trusted=yes]", packages.BRAVE_SOURCE)
+
+    def test_cli_matches_python_api(self):
+        script = Path(packages.__file__)
+        for group in packages.APT_GROUPS:
+            output = subprocess.run([sys.executable, str(script), "--apt", group], capture_output=True, text=True, check=True)
+            self.assertEqual(output.stdout.strip(), packages.apt_list(group))
+        output = subprocess.run([sys.executable, str(script), "--brave-package"], capture_output=True, text=True, check=True)
+        self.assertEqual(output.stdout.strip(), packages.BRAVE_PACKAGE)
+
+
+class ShellSetupTests(unittest.TestCase):
+
+    def test_user_setup_refuses_root(self):
+        with patch("shell_setup.os.geteuid", return_value=0):
+            with self.assertRaisesRegex(ValueError, "pas root"):
+                shell_setup.configure_user()
+
+    def test_system_setup_requires_root(self):
+        with patch("shell_setup.os.geteuid", return_value=1000):
+            with self.assertRaisesRegex(ValueError, "réservée"):
+                shell_setup.system("ubunturiri")
+
+    def test_user_setup_backs_up_existing_bashrc(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "home"
+            files = Path(temporary) / "files"
+            files.mkdir()
+            for name in ["bashrc", "starship.toml", "ghostty-config"]:
+                (files / name).write_text(f"contenu {name}\n")
+            home.mkdir()
+            (home / ".bashrc").write_text("bashrc Ubuntu d’origine\n")
+            with patch("shell_setup.FILES", files), patch("shell_setup.os.geteuid", return_value=1000), patch("shell_setup.Path.home", return_value=home), contextlib.redirect_stdout(io.StringIO()):
+                shell_setup.configure_user()
+            self.assertEqual((home / ".bashrc.ubuntu-origine").read_text(), "bashrc Ubuntu d’origine\n")
+            self.assertEqual((home / ".bashrc").read_text(), "contenu bashrc\n")
+            self.assertTrue((home / ".config/starship.toml").is_file())
+            self.assertTrue((home / ".config/ghostty/config").is_file())
+            self.assertTrue((home / ".bashrc.local").is_file())
+
+    def test_user_setup_reports_missing_payload_file(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "home"
+            home.mkdir()
+            with patch("shell_setup.FILES", Path(temporary) / "absent"), patch("shell_setup.os.geteuid", return_value=1000), patch("shell_setup.Path.home", return_value=home):
+                with self.assertRaisesRegex(ValueError, "absent du contenu embarqué"):
+                    shell_setup.configure_user()
+
+
+class BashrcTests(unittest.TestCase):
+
+    def setUp(self):
+        self.text = (build_iso.ROOT / "scripts/files/bashrc").read_text()
+
+    def test_syntax_is_valid_bash(self):
+        subprocess.run(["bash", "-n", str(build_iso.ROOT / "scripts/files/bashrc")], check=True)
+
+    def test_ble_attach_is_the_last_statement(self):
+        statements = [line for line in self.text.splitlines() if line.strip() and not line.lstrip().startswith("#")]
+        self.assertEqual(statements[-1], "fi")
+        self.assertIn("ble-attach", statements[-2])
+        self.assertLess(self.text.index("--noattach"), self.text.index("starship init bash"))
+        self.assertLess(self.text.index("starship init bash"), self.text.rindex("ble-attach"))
+
+    def test_returns_early_when_not_interactive(self):
+        self.assertLess(self.text.index("*) return ;;"), self.text.index("/usr/share/blesh/ble.sh"))
+
+    def test_no_trailing_comment_after_a_value(self):
+        for number, line in enumerate(self.text.splitlines(), 1):
+            if line.lstrip().startswith("#"):
+                continue
+            quote = None
+            for index, character in enumerate(line):
+                if quote:
+                    quote = None if character == quote else quote
+                elif character in "'\"":
+                    quote = character
+                elif character == "#" and index and line[index - 1].isspace():
+                    self.fail(f"commentaire en fin de ligne {number} : {line}")
 
 
 if __name__ == "__main__":

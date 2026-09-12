@@ -15,6 +15,7 @@ import urllib.request
 from pathlib import Path
 
 from iso_config import autoinstall, identity, patch_grub, verify_payload
+from packages import PINS
 
 ROOT = Path(__file__).resolve().parent.parent
 RELEASE = "https://releases.ubuntu.com/24.04/"
@@ -153,11 +154,39 @@ def unpack(archive, destination):
     return roots[0]
 
 
+def fetch_pins(payload, cache):
+    """Télécharge les composants épinglés et refuse toute empreinte inattendue."""
+    for name, pin in PINS.items():
+        cached = cache / f"{pin['version'].replace('/', '_')}-{Path(name).name}"
+        if cached.is_file() and sha256(cached) != pin["sha256"]:
+            cached.unlink()
+        if not cached.is_file():
+            print(f"Téléchargement de {name} version {pin['version']}.")
+            download(pin["url"], cached)
+        digest = sha256(cached)
+        if digest != pin["sha256"]:
+            raise ValueError(
+                f"SHA-256 inattendu pour {name} : attendu {pin['sha256']}, obtenu {digest}. "
+                "Le composant amont a changé ; vérifier la source puis relancer "
+                "python3 scripts/refresh_pins.py --write."
+            )
+        destination = payload / name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        check_space(payload, cached.stat().st_size + 64 * 1024 ** 2)
+        shutil.copy2(cached, destination)
+    print(f"{len(PINS)} composants épinglés vérifiés et embarqués.")
+
+
 def prepare_payload(work, citrix, cache):
     payload = work / "payload"
     payload.mkdir()
-    for name in ["iso_config.py", "install-desktop.sh", "session_setup.py", "theme.py", "citrix_mode.py"]:
+    for name in ["iso_config.py", "install-desktop.sh", "session_setup.py", "theme.py", "citrix_mode.py", "packages.py", "shell_setup.py"]:
         shutil.copy2(ROOT / "scripts" / name, payload / name)
+    for source in sorted((ROOT / "scripts/files").iterdir()):
+        if source.is_file():
+            (payload / "files").mkdir(exist_ok=True)
+            shutil.copy2(source, payload / "files" / source.name)
+    fetch_pins(payload, cache)
     if not citrix.is_file():
         raise ValueError("Fournir le paquet DEB AMD64 officiel de Citrix Workspace avec --citrix-deb.")
     for field, expected in [("Package", "icaclient"), ("Architecture", "amd64")]:
